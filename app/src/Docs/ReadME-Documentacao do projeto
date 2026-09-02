@@ -1,0 +1,503 @@
+# 📱 MedAlert — Documentação Técnica do Projeto
+
+> Documento-base do projeto. Deve ser atualizado conforme novas funcionalidades forem implementadas.
+> Última atualização: reflete o estado do código após a implementação da tela de Adicionar Medicamento com horário personalizado.
+
+---
+
+## 1. Visão Geral do Projeto
+
+**MedAlert** é um aplicativo Android nativo cujo objetivo é auxiliar usuários no controle e acompanhamento do uso de medicamentos: cadastro de remédios, horários, lembretes, registro de doses e histórico de adesão ao tratamento.
+
+**Stack atual:**
+
+| Item | Tecnologia |
+|---|---|
+| Linguagem | Kotlin |
+| UI | Jetpack Compose |
+| Design system | Material 3 |
+| Navegação | Navigation Compose |
+| Persistência | Nenhuma ainda (dados mockados em memória) |
+| Backend | Não implementado |
+
+**Estado atual do projeto:** estamos na fase de **frontend/UI**. Todas as telas usam dados mockados (fixos no código), sem ViewModel, Repository, Room ou API. A prioridade tem sido validar fluxo de navegação e identidade visual antes de conectar qualquer persistência real.
+
+---
+
+## 2. Estrutura de Pastas (real, atual)
+
+```
+app/src/main/java/com/andre/medalert/
+│
+├── MainActivity.kt
+│
+├── data/
+│   ├── model/
+│   │       Medication.kt
+│   └── mock/
+│           MockData.kt
+│
+├── ui/
+│   ├── theme/
+│   │       Color.kt
+│   │       Theme.kt
+│   │       Type.kt
+│   │
+│   ├── components/
+│   │       BottomNavigationBar.kt
+│   │
+│   └── screens/
+│       ├── onboarding/
+│       │       OnboardingScreen.kt
+│       ├── login/
+│       │       LoginScreen.kt
+│       ├── cadastro/
+│       │       CadastroScreen.kt
+│       ├── home/
+│       │       HomeScreen.kt
+│       └── medications/
+│               MedicationsScreen.kt
+│               AddMedicationScreen.kt
+│
+└── navigation/            (pasta existe, mas está VAZIA — o NavHost está direto no MainActivity.kt)
+```
+
+> Pastas mencionadas em planejamentos anteriores (`data/local`, `data/remote`, `data/repository`, `viewmodel/`, `notifications/`) **ainda não existem** no projeto. Foram citadas como estrutura-alvo futura, não como implementação atual.
+
+---
+
+## 3. Mapa das Telas
+
+| Tela | Arquivo | Responsabilidade | Status |
+|---|---|---|---|
+| Onboarding | `ui/screens/onboarding/OnboardingScreen.kt` | Apresentação inicial do app, com CTA para Cadastro/Login | ✅ Implementada |
+| Login | `ui/screens/login/LoginScreen.kt` | Formulário visual de login (sem autenticação real) | ✅ Implementada |
+| Cadastro | `ui/screens/cadastro/CadastroScreen.kt` | Formulário visual de criação de conta (sem persistência) | ✅ Implementada |
+| Home | `ui/screens/home/HomeScreen.kt` | Dashboard: horários pendentes, medicamentos de hoje, adesão, responsáveis | ✅ Implementada (dados mockados) |
+| Medicamentos | `ui/screens/medications/MedicationsScreen.kt` | Lista de medicamentos cadastrados, com editar/excluir | ✅ Implementada (dados mockados) |
+| Adicionar/Editar Medicamento | `ui/screens/medications/AddMedicationScreen.kt` | Formulário de cadastro de medicamento, com horários rápidos + horário personalizado | ✅ Implementada (não persiste — apenas monta o objeto e volta) |
+| Calendário | — | — | ❌ Não implementada (planejada) |
+| Histórico | — | — | ❌ Não implementada (planejada) |
+| Responsáveis | — | — | ❌ Não implementada (planejada) |
+| Configurações | — | — | ❌ Não implementada (planejada) |
+
+---
+
+## 4. Navegação
+
+O `NavHost` está centralizado dentro de `MainActivity.kt`, dentro do `setContent { }`. Não existe (ainda) um arquivo separado de navegação — a pasta `navigation/` está vazia.
+
+**Rotas atualmente registradas:**
+
+```
+"onboarding"      → OnboardingScreen
+"login"           → LoginScreen
+"cadastro"        → CadastroScreen
+"home"            → HomeScreen
+"medications"     → MedicationsScreen
+"addMedication"   → AddMedicationScreen
+```
+
+**Fluxo real implementado:**
+
+```
+Onboarding
+   ├── (Começar) ────────────► Cadastro ───► Home
+   └── (Já tenho uma conta) ─► Login ──────► Home
+
+Home
+   └── Bottom Navigation
+        ├── Início ──────► Home (própria tela)
+        ├── Remédios ────► Medicamentos
+        ├── Calendário ──► (sem ação — tela não existe)
+        ├── Histórico ───► (sem ação — tela não existe)
+        └── Ajustes ─────► (sem ação — tela não existe)
+
+Medicamentos
+   └── (+ Adicionar medicamento) ──► AddMedicationScreen ──(Salvar)──► volta para Medicamentos (popBackStack)
+```
+
+Ao entrar em `home` vindo de Login/Cadastro, o back stack é limpo com `popUpTo("onboarding") { inclusive = true }` — ou seja, o gesto de "voltar" não retorna para as telas de autenticação depois que o usuário chega na Home.
+
+Não existem argumentos de navegação sendo passados entre rotas ainda (por exemplo, "editar medicamento X" não navega passando o ID do medicamento — isso é um ponto em aberto, detalhado na seção 9).
+
+---
+
+## 5. Componentes Reutilizáveis
+
+### `BottomNavigationBar`
+**Arquivo:** `ui/components/BottomNavigationBar.kt`
+**Responsabilidade:** menu inferior fixo com 5 abas (Início, Remédios, Calendário, Histórico, Ajustes).
+**Parâmetros:**
+- `selectedRoute: String` — qual aba está destacada visualmente.
+- `onItemClick: (String) -> Unit` — callback disparado com a rota da aba tocada.
+
+**Onde é usado:** `HomeScreen` e `MedicationsScreen` (via `Scaffold(bottomBar = ...)`).
+
+### `FieldLabel` e `MedAlertTextField`
+**Arquivo:** definidos dentro de `ui/screens/login/LoginScreen.kt`, marcados como `internal` (não `private`) para poderem ser importados por outras telas.
+**Responsabilidade:** rótulo de campo de formulário e campo de texto estilizado (cor de fundo do card, cursor ciano, suporte a senha/ícone).
+**Reutilizado em:** `CadastroScreen.kt` e `AddMedicationScreen.kt` (importados diretamente de `ui.screens.login`).
+
+> ⚠️ **Ponto de atenção:** esses dois componentes moram fisicamente dentro do arquivo da tela de Login, não em `ui/components/`. Funciona porque estão marcados `internal`, mas do ponto de vista de organização, o ideal futuro é extraí-los para `ui/components/FormFields.kt` — ainda não fizemos essa extração.
+
+### Componentes internos (não reutilizados fora do arquivo onde vivem)
+- `OnboardingFeatureCard` (dentro de `OnboardingScreen.kt`)
+- `HomeHeader`, `UpcomingTimeChip`, `MedicationDoseRow`, `StatCard` (dentro de `HomeScreen.kt`)
+- `MedicationCard`, `InfoChip`, `DeleteConfirmationDialog` (dentro de `MedicationsScreen.kt`)
+- `TimeChip`, `FrequencyChip`, `CustomTimePickerDialog` (dentro de `AddMedicationScreen.kt`)
+
+---
+
+## 6. Classes e Modelos de Dados
+
+**Arquivo:** `data/model/Medication.kt`
+
+### `Medication`
+
+| Campo | Tipo | Descrição |
+|---|---|---|
+| `id` | `String` | Identificador do medicamento |
+| `name` | `String` | Nome do medicamento |
+| `dosage` | `String` | Dosagem (ex.: "50 mg") |
+| `quantity` | `String` | Quantidade por dose (ex.: "1 comprimido") |
+| `schedules` | `List<String>` | Lista de horários no formato "HH:mm" |
+| `frequency` | `String` | Texto livre (ex.: "Todos os dias") |
+| `startDate` | `String?` | Ainda não usado na UI atual (campo existe no modelo, mas a tela de formulário não tem seletor de data implementado ainda) |
+| `endDate` | `String?` | Idem acima |
+| `notes` | `String?` | Observações do usuário |
+| `active` | `Boolean` | Se o medicamento está ativo (default `true`) |
+
+### `DoseStatus` (enum)
+```kotlin
+enum class DoseStatus { TAKEN, PENDING, MISSED }
+```
+> `MISSED` existe no enum, mas **nenhum dado mockado atual usa esse status** — os mocks só têm `TAKEN` e `PENDING`.
+
+### `MedicationDose`
+
+| Campo | Tipo | Descrição |
+|---|---|---|
+| `id` | `String` | Identificador da dose |
+| `medicationId` | `String` | Referência ao `Medication.id` correspondente |
+| `medicationName` | `String` | Nome duplicado aqui para facilitar exibição direta na UI sem precisar buscar o medicamento |
+| `dosage` | `String` | Dosagem duplicada, mesmo motivo acima |
+| `scheduledTime` | `String` | Horário programado |
+| `takenAt` | `String?` | Horário real em que foi tomado (`null` se ainda pendente) |
+| `status` | `DoseStatus` | Estado atual da dose |
+
+> `MedicationDose` foi projetado como o embrião do que futuramente será a tabela de histórico (`MedicationHistory`) no banco — por isso já é separado de `Medication`, mesmo sem persistência ainda.
+
+---
+
+## 7. Estado Atual dos Dados
+
+### Dados reais (persistidos de verdade)
+**Nenhum.** Não existe Room, SharedPreferences, DataStore ou qualquer gravação em disco no projeto até o momento.
+
+### Dados temporários (existem só enquanto a tela está aberta)
+- Os campos do formulário em `LoginScreen`, `CadastroScreen` e `AddMedicationScreen` (nome, e-mail, senha, dosagem etc.) são guardados com `remember { mutableStateOf(...) }`. Isso significa que **somem assim que o Composable sai de composição** (por exemplo, ao navegar para outra tela ou fechar o app).
+- O objeto `Medication` montado ao clicar em "Salvar medicamento" em `AddMedicationScreen` é criado e imediatamente passado para `onSaveClick`, que hoje **só faz `navController.popBackStack()`** — o medicamento não é salvo em lugar nenhum, é descartado.
+
+### Dados mockados (fixos no código, para preencher a interface)
+**Arquivo:** `data/mock/MockData.kt`
+
+| Dado | Local no código |
+|---|---|
+| Lista de 3 medicamentos (Vitamina D, Losartana, Omeprazol) | `MockData.medications` |
+| Lista de 4 doses do dia | `MockData.medicationsToday` |
+| Percentual de adesão (`92`) | `MockData.adherencePercentage` (constante fixa) |
+| Quantidade de responsáveis (`2`) | `MockData.responsibleCount` (constante fixa) |
+| Lista de horários rápidos (`06:00` até `22:00`) | constante `horariosRapidos` dentro de `AddMedicationScreen.kt` |
+| Lista de frequências (`Todos os dias`, `Dias alternados`, etc.) | constante `frequencias` dentro de `AddMedicationScreen.kt` |
+
+Esses dados são consumidos pelas telas via **parâmetro com valor default**, por exemplo:
+
+```kotlin
+fun HomeScreen(
+    medicationsToday: List<MedicationDose> = MockData.medicationsToday,
+    ...
+)
+```
+
+Essa escolha foi intencional: quando o Repository/ViewModel existir, basta **parar de usar o valor default** e passar a lista vinda do ViewModel — a assinatura da função não muda.
+
+---
+
+## 8. Fluxo dos Dados (atual)
+
+```
+MockData (objeto fixo em memória)
+        ↓
+Screen (recebe como parâmetro default)
+        ↓
+Composables internos (Card, Row, Chip...)
+        ↓
+Renderização na tela
+```
+
+Não existe `ViewModel` nem `Repository` no projeto atualmente. O único "estado" que existe é o estado local de UI (`remember { mutableStateOf(...) }`), usado para: campos de formulário, qual horário/frequência está selecionado no formulário de medicamento, e qual medicamento está marcado para exclusão (controla a exibição do diálogo de confirmação).
+
+```
+Estado local (remember/mutableStateOf)
+        ↓
+Recomposição do Composable
+        ↓
+UI atualizada
+```
+
+---
+
+## 9. Fluxo de Adicionar / Editar / Excluir Medicamento
+
+**Arquivo:** `ui/screens/medications/AddMedicationScreen.kt`
+
+### Campos existentes no formulário
+- Nome (`MedAlertTextField`)
+- Dosagem (`MedAlertTextField`)
+- Quantidade (`MedAlertTextField`)
+- Horários (grade de `TimeChip`, seleção múltipla via `Set<String>`)
+- Frequência (grade de `FrequencyChip`, seleção única via `String`)
+- Observações (`MedAlertTextField`)
+
+**Campos que existem no modelo `Medication` mas NÃO têm campo correspondente na UI ainda:** `startDate`, `endDate`. O prompt original pedia seletor de data — isso ainda não foi implementado visualmente.
+
+### Como os horários são tratados
+Todos os horários — sejam os 7 pré-definidos (`horariosRapidos`) ou os personalizados adicionados pelo usuário — são guardados **da mesma forma**, como `String` no formato `"HH:mm"`, dentro de um único `Set<String>` chamado `horariosSelecionados`. Não existe distinção estrutural entre "horário rápido" e "horário personalizado" no dado final — a distinção existe só durante a montagem da grade visual (`horariosPersonalizados` é usado apenas para saber quais chips extras desenhar na tela).
+
+### Como funciona o horário personalizado
+1. Usuário toca em "+ Horário personalizado".
+2. Abre `CustomTimePickerDialog`, que usa o componente **nativo** `TimePicker` do Material 3 (`rememberTimePickerState`), dentro de um `Dialog` do Compose.
+3. Ao confirmar, o horário escolhido (`"HH:mm"`) é adicionado tanto a `horariosPersonalizados` quanto a `horariosSelecionados`.
+4. O botão continua disponível depois — o usuário pode repetir o processo quantas vezes quiser.
+5. Qualquer horário (rápido ou personalizado) pode ser desmarcado tocando nele de novo.
+
+### O que acontece ao clicar em "Salvar medicamento" / "Salvar alterações"
+Um objeto `Medication` é montado em memória (juntando todos os campos do formulário) e passado para o callback `onSaveClick`. **Hoje, o `MainActivity.kt` só faz `navController.popBackStack()` nesse callback** — ou seja, o medicamento é descartado, não vai para lista nenhuma. Isso é um ponto pendente (ver seção 16).
+
+### Modo Editar
+A tela já foi projetada para aceitar um parâmetro opcional `medication: Medication?`:
+- Se `null` → título "Novo medicamento", campos vazios.
+- Se preenchido → título "Editar medicamento", campos pré-preenchidos com os dados do medicamento recebido.
+
+**Porém**, a navegação real para o modo Editar **ainda não está ligada**: em `MainActivity.kt`, o callback `onEditClick` de `MedicationsScreen` está vazio (comentado como "etapa futura"). Ou seja, o suporte a edição existe na tela de formulário, mas nenhum botão do app hoje efetivamente abre esse modo.
+
+### Excluir medicamento
+Implementado apenas em `MedicationsScreen.kt`. Ao tocar em "Excluir" num card, abre `DeleteConfirmationDialog` (um `AlertDialog` do Material 3). Ao confirmar, **nada é removido de fato** — o comentário no código diz explicitamente que é "simulação apenas visual", e a lista `medications` exibida continua vindo do `MockData` sem alteração.
+
+---
+
+## 10. Histórico
+
+**Não implementado.** Não existe arquivo, tela, rota ou modelo de histórico no projeto atual. O que existe de relacionado é o modelo `MedicationDose` (seção 6), que foi desenhado pensando em eventualmente alimentar uma futura tela de Histórico, mas essa tela em si ainda não foi criada.
+
+---
+
+## 11. Home — Detalhamento
+
+**Arquivo:** `ui/screens/home/HomeScreen.kt`
+
+### Medicamentos de hoje
+Renderizados a partir do parâmetro `medicationsToday: List<MedicationDose> = MockData.medicationsToday`, um `Row` por dose (`MedicationDoseRow`), mostrando ícone de check (se tomado) ou ícone de comprimido (se pendente), nome, dosagem, "tomado às HH:mm" quando aplicável, e o horário programado.
+
+### Horários pendentes (chips no topo)
+Calculado dinamicamente dentro do próprio Composable:
+```kotlin
+val pendingTimes = medicationsToday
+    .filter { it.status == DoseStatus.PENDING }
+    .map { it.scheduledTime }
+    .distinct()
+    .sorted()
+```
+Isso é o único "cálculo" que existe na Home hoje — é derivado da lista mockada, não é um dado próprio.
+
+### Adesão ao tratamento
+Vem de `adherencePercentage: Int = MockData.adherencePercentage`, que é uma **constante fixa (`92`)**, sem nenhum cálculo real por trás. Exibido dentro de um `StatCard` clicável (`onAdherenceClick`), mas o clique não navega para lugar nenhum ainda.
+
+### Responsáveis acompanhando
+Mesma situação: `responsibleCount: Int = MockData.responsibleCount`, constante fixa (`2`), sem tela ou dado real por trás. Também clicável sem destino (`onResponsiblesClick`).
+
+---
+
+## 12. Arquitetura Atual
+
+```
+UI (Composable Screens)
+        ↓
+Estado local (remember / mutableStateOf)
+        ↓
+Dados mockados (MockData.kt)
+```
+
+**O que NÃO existe hoje:**
+- ❌ ViewModel
+- ❌ Repository
+- ❌ DAO
+- ❌ Room / banco de dados
+- ❌ API / Retrofit
+- ❌ Autenticação real (Login e Cadastro são só formulários visuais)
+- ❌ Injeção de dependência (Hilt/Koin ou manual)
+
+Isso é intencional nesta fase do projeto — o foco definido desde o início foi validar UI e navegação antes de conectar persistência.
+
+---
+
+## 13. Arquitetura Futura (planejamento, NÃO implementado)
+
+```
+HomeScreen / MedicationsScreen / AddMedicationScreen
+        ↓
+HomeViewModel / MedicationViewModel   (ainda não existe)
+        ↓
+MedicationRepository                   (ainda não existe)
+        ↓
+MedicationDao                          (ainda não existe)
+        ↓
+MedicationDatabase (Room)              (ainda não existe)
+        ↓
+SQLite (arquivo local do dispositivo)
+```
+
+**Como o código atual já ajuda nessa transição:**
+- As telas já recebem dados via **parâmetro com default do Mock** — trocar por `viewModel.medications.collectAsState()` no futuro não deve exigir reescrever o layout, só a origem do dado.
+- `Medication` e `MedicationDose` já são classes separadas, preparando o terreno para `Medication` virar `@Entity` do Room e `MedicationDose` virar a base de uma futura tabela de histórico.
+- Os callbacks (`onSaveClick`, `onEditClick`, `onNavigate` etc.) já existem como parâmetros das telas — no futuro, quem implementa esses callbacks passa a ser o ViewModel/NavHost falando com o Repository, em vez de ficar vazio ou só navegando.
+
+---
+
+## 14. Planejamento do Backend (proposta futura — nada disso existe no código ainda)
+
+| Entidade proposta | Campos prováveis |
+|---|---|
+| `Medication` | id, name, dosage, quantity, schedules, frequency, startDate, endDate, notes, active (já existe como modelo Kotlin puro; faltaria virar `@Entity` do Room) |
+| `MedicationHistory` | id, medicationId, scheduledTime, takenAt, status, date (evolução do atual `MedicationDose`) |
+| `Responsible` | id, patientId, name, relationship, contact, permissions (nada disso existe ainda — nem modelo Kotlin) |
+| `User` | id, name, email, passwordHash (nada disso existe ainda — Login/Cadastro são só UI) |
+
+---
+
+## 15. ✅ O que já está pronto
+
+- [x] Onboarding (tela + navegação para Login/Cadastro)
+- [x] Login (visual, com campos de e-mail/senha)
+- [x] Cadastro (visual, com campos de nome/e-mail/senha/confirmação)
+- [x] Home (dashboard com dados mockados)
+- [x] Bottom Navigation (componente reutilizável, 5 abas)
+- [x] Navegação entre Onboarding → Login/Cadastro → Home → Medicamentos
+- [x] Tela de Medicamentos (lista em cards)
+- [x] Cards de medicamento (nome, dosagem, horários, frequência, status "Ativo")
+- [x] Botão "+ Adicionar medicamento"
+- [x] Tela de Adicionar Medicamento (formulário completo)
+- [x] Seleção de horários pré-definidos (múltipla escolha)
+- [x] Horário personalizado via `TimePicker` nativo do Material 3
+- [x] Seleção de frequência
+- [x] Diálogo de confirmação de exclusão (visual apenas)
+- [x] Modelos `Medication`, `MedicationDose`, `DoseStatus`
+- [x] Dados mockados centralizados em `MockData.kt`
+
+## 16. ❌ O que ainda falta
+
+- [ ] Persistir o medicamento salvo no formulário (hoje é descartado ao voltar)
+- [ ] Ligar o botão "Editar" da tela de Medicamentos ao modo Editar do formulário (a tela já suporta, falta a navegação)
+- [ ] Excluir medicamento de verdade (hoje é só visual)
+- [ ] Tela de Calendário
+- [ ] Tela de Histórico
+- [ ] Tela de Responsáveis (adicionar/editar/excluir)
+- [ ] Tela de Configurações
+- [ ] Seletores de Data de início / Data de término no formulário de medicamento
+- [ ] Cálculo real de adesão ao tratamento (hoje é constante fixa)
+- [ ] Contagem real de responsáveis (hoje é constante fixa)
+- [ ] ViewModel (qualquer tela)
+- [ ] Repository
+- [ ] Room (entidades, DAOs, banco)
+- [ ] Autenticação real (Login/Cadastro não validam nem persistem nada)
+- [ ] Notificações / lembretes
+- [ ] AlarmManager / WorkManager
+
+---
+
+## 17. Pontos de Atenção para o Desenvolvimento Futuro
+
+- **Não** colocar lógica de banco diretamente dentro dos Composables de tela — quando Room existir, ela deve passar por Repository/ViewModel.
+- `FieldLabel` e `MedAlertTextField` estão fisicamente dentro de `LoginScreen.kt` — mover para `ui/components/FormFields.kt` antes que mais telas passem a depender desse acoplamento indireto.
+- O `MedicationDose` já separa a dose (evento do dia) do `Medication` (cadastro) — manter essa separação quando migrar para Room, criando tabelas distintas com `medicationId` como chave estrangeira.
+- Os horários (`schedules: List<String>`) são armazenados como texto simples (`"HH:mm"`). Isso funciona para mock, mas ao ir para Room, decidir se continua como `String` (serializada) ou vira uma tabela relacionada (`MedicationSchedule`), como o documento de arquitetura original já cogitava.
+- O objeto salvo em `AddMedicationScreen` tem `id = System.currentTimeMillis().toString()` como placeholder — isso deve ser substituído pela geração de ID real do Room (autoincrement) quando a persistência entrar.
+- `onEditClick`, `onSaveClick`, `onAdherenceClick`, `onResponsiblesClick` estão todos vazios ou incompletos hoje — são os "pontos de encaixe" para o futuro ViewModel, não remover essas assinaturas ao evoluir o código, só preencher a implementação.
+- As 3 abas do menu inferior sem tela (Calendário, Histórico, Ajustes) não geram erro ao tocar — o `onNavigate` da Home simplesmente ignora rotas desconhecidas. Ao criar essas telas, lembrar de adicionar tanto a rota no `MainActivity.kt` quanto tratar no bloco `if` do `onNavigate`.
+
+---
+
+## 18. Guia de Manutenção Rápida
+
+### "Quero adicionar uma nova tela"
+1. Criar pasta em `ui/screens/nome_da_tela/` com o arquivo `NomeDaTelaScreen.kt`.
+2. Adicionar a rota (`composable("nome_da_tela") { ... }`) dentro do `NavHost` em `MainActivity.kt`.
+3. Se a tela precisar do menu inferior, usar `Scaffold(bottomBar = { BottomNavigationBar(...) })` como já feito em `HomeScreen`/`MedicationsScreen`.
+
+### "Quero adicionar um novo campo ao medicamento"
+1. Adicionar o campo em `data/model/Medication.kt`.
+2. Adicionar o `remember { mutableStateOf(...) }` correspondente e o campo visual em `AddMedicationScreen.kt`.
+3. Incluir o campo na montagem do objeto `Medication(...)` dentro do `onClick` do botão Salvar.
+4. Atualizar `MockData.kt` se quiser ver dados de exemplo com esse campo preenchido.
+
+### "Quero conectar o medicamento ao banco (Room)"
+Camadas a criar (nenhuma existe ainda):
+1. `data/local/MedicationEntity.kt` (ou anotar `Medication` como `@Entity`)
+2. `data/local/MedicationDao.kt`
+3. `data/local/MedAlertDatabase.kt`
+4. `data/repository/MedicationRepository.kt`
+5. `viewmodel/MedicationViewModel.kt`
+6. Trocar, nas telas, o parâmetro default `= MockData.medications` por `viewModel.medications.collectAsState()`.
+
+### "Quero alterar a aparência de um card"
+Procurar o Composable privado correspondente dentro do arquivo da tela: `MedicationCard` (em `MedicationsScreen.kt`), `MedicationDoseRow`/`StatCard` (em `HomeScreen.kt`), `OnboardingFeatureCard` (em `OnboardingScreen.kt`). As cores usadas vêm sempre de `ui/theme/Color.kt` (`MedAlertPrimary`, `MedAlertCard`, etc.) — nunca hardcoded, exceto a cor de erro `Color(0xFFE5484D)` usada nos botões de excluir.
+
+### "Quero alterar uma rota"
+Tudo está centralizado em `MainActivity.kt`, dentro do bloco `NavHost { ... }`. Não há arquivo de rotas separado ainda (a pasta `navigation/` está vazia).
+
+---
+
+## Resumo da Arquitetura Atual
+
+```
+┌─────────────────────────────────────────────┐
+│                   UI (Compose)                │
+│  Onboarding → Login/Cadastro → Home → ...     │
+└───────────────────┬───────────────────────────┘
+                    │ lê (via parâmetro default)
+                    ▼
+┌─────────────────────────────────────────────┐
+│         data/mock/MockData.kt (fixo)          │
+│      data/model/Medication.kt (Kotlin puro)   │
+└─────────────────────────────────────────────┘
+
+Estado de formulário/UI: remember { mutableStateOf(...) } local a cada tela.
+Nenhuma camada de ViewModel, Repository ou banco existe hoje.
+```
+
+## Evolução Planejada
+
+```
+┌─────────────────────────────────────────────┐
+│                   UI (Compose)                │
+└───────────────────┬───────────────────────────┘
+                    ▼
+┌─────────────────────────────────────────────┐
+│            ViewModel (a criar)                │
+└───────────────────┬───────────────────────────┘
+                    ▼
+┌─────────────────────────────────────────────┐
+│        Repository (MedicationRepository)      │
+└───────────────────┬───────────────────────────┘
+                    ▼
+┌─────────────────────────────────────────────┐
+│              DAO (MedicationDao)              │
+└───────────────────┬───────────────────────────┘
+                    ▼
+┌─────────────────────────────────────────────┐
+│         Room Database (MedAlertDatabase)      │
+└─────────────────────────────────────────────┘
+```
+
+A migração é incremental: primeiro Room, depois trocar `MockData` por chamadas ao Repository nas telas que já existem hoje, sem precisar redesenhar layout nenhum.
