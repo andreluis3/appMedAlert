@@ -11,6 +11,7 @@ import com.andre.medalert.ui.screens.cadastro.CadastroScreen
 import com.andre.medalert.ui.screens.home.HomeScreen
 import com.andre.medalert.ui.screens.login.LoginScreen
 import com.andre.medalert.ui.screens.onboarding.OnboardingScreen
+import com.andre.medalert.ui.screens.settings.SettingsScreen
 import com.andre.medalert.ui.theme.MedAlertTheme
 import com.andre.medalert.ui.screens.medications.AddMedicationScreen
 import com.andre.medalert.ui.screens.medications.MedicationsScreen
@@ -22,6 +23,18 @@ class MainActivity : ComponentActivity() {
         setContent {
             MedAlertTheme {
                 val navController = rememberNavController()
+
+                // Rotas que já têm tela implementada e podem ser navegadas
+                // a partir da barra inferior. "calendar" e "history" ainda
+                // não estão wired aqui.
+                val navigateToTab: (String) -> Unit = { route ->
+                    if (route == "home" || route == "medications" || route == "settings") {
+                        navController.navigate(route) {
+                            popUpTo("home")
+                            launchSingleTop = true
+                        }
+                    }
+                }
 
                 NavHost(
                     navController = navController,
@@ -60,29 +73,13 @@ class MainActivity : ComponentActivity() {
 
                     composable("home") {
                         HomeScreen(
-                            onNavigate = { route ->
-                                if (route == "home" || route == "medications") {
-                                    navController.navigate(route) {
-                                        popUpTo("home")
-                                        launchSingleTop = true
-                                    }
-                                }
-                                // "calendar", "history", "settings" ainda não têm tela.
-                                // Tocar nessas abas não faz nada por enquanto.
-                            }
+                            onNavigate = navigateToTab
                         )
                     }
 
                     composable("medications") {
                         MedicationsScreen(
-                            onNavigate = { route ->
-                                if (route == "home" || route == "medications") {
-                                    navController.navigate(route) {
-                                        popUpTo("home")
-                                        launchSingleTop = true
-                                    }
-                                }
-                            },
+                            onNavigate = navigateToTab,
                             onAddClick = { navController.navigate("addMedication") },
                             onEditClick = {
                                 // Etapa futura: navegar pra addMedication passando o medicamento
@@ -98,6 +95,20 @@ class MainActivity : ComponentActivity() {
                                 // Simulação por enquanto: só volta pra tela de Remédios.
                                 // Quando tivermos Repository, aqui entra o salvamento real.
                                 navController.popBackStack()
+                            }
+                        )
+                    }
+
+                    composable("settings") {
+                        SettingsScreen(
+                            onNavigate = navigateToTab,
+                            onProfileClick = {
+                                // Etapa futura: tela de perfil detalhada.
+                            },
+                            onLogoutClick = {
+                                navController.navigate("onboarding") {
+                                    popUpTo(0) { inclusive = true }
+                                }
                             }
                         )
                     }
