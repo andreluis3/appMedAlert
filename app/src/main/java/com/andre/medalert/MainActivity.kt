@@ -8,6 +8,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.andre.medalert.ui.screens.cadastro.CadastroScreen
+import com.andre.medalert.ui.screens.calendar.CalendarScreen
+import com.andre.medalert.ui.screens.history.HistoryScreen
 import com.andre.medalert.ui.screens.home.HomeScreen
 import com.andre.medalert.ui.screens.login.LoginScreen
 import com.andre.medalert.ui.screens.onboarding.OnboardingScreen
@@ -24,11 +26,9 @@ class MainActivity : ComponentActivity() {
             MedAlertTheme {
                 val navController = rememberNavController()
 
-                // Rotas que já têm tela implementada e podem ser navegadas
-                // a partir da barra inferior. "calendar" e "history" ainda
-                // não estão wired aqui.
+                // Todas as 5 abas da bottom bar já têm tela implementada.
                 val navigateToTab: (String) -> Unit = { route ->
-                    if (route == "home" || route == "medications" || route == "settings") {
+                    if (route == "home" || route == "medications" || route == "calendar" || route == "history" || route == "settings") {
                         navController.navigate(route) {
                             popUpTo("home")
                             launchSingleTop = true
@@ -95,6 +95,24 @@ class MainActivity : ComponentActivity() {
                                 // Simulação por enquanto: só volta pra tela de Remédios.
                                 // Quando tivermos Repository, aqui entra o salvamento real.
                                 navController.popBackStack()
+                            }
+                        )
+                    }
+
+                    composable("calendar") {
+                        CalendarScreen(
+                            onNavigate = navigateToTab,
+                            onDayClick = {
+                                // Etapa futura: abrir resumo das doses daquele dia
+                            }
+                        )
+                    }
+
+                    composable("history") {
+                        HistoryScreen(
+                            onNavigate = navigateToTab,
+                            onAdherenceClick = {
+                                // Etapa futura: tela detalhada de adesão
                             }
                         )
                     }
