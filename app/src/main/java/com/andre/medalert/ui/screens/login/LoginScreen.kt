@@ -31,6 +31,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.andre.medalert.ui.components.DosyLogo
 import com.andre.medalert.ui.theme.MedAlertBackground
 import com.andre.medalert.ui.theme.MedAlertCard
 import com.andre.medalert.ui.theme.MedAlertPrimary
@@ -62,12 +63,7 @@ fun LoginScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Box(
-            modifier = Modifier.size(48.dp).background(MedAlertCard, shape = CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(Icons.Filled.Medication, contentDescription = null, tint = MedAlertPrimary, modifier = Modifier.size(24.dp))
-        }
+        DosyLogo(height = 36.dp)
 
         Spacer(modifier = Modifier.height(20.dp))
 

@@ -26,7 +26,8 @@ import com.andre.medalert.ui.theme.MedAlertCard
 import com.andre.medalert.ui.theme.MedAlertPrimary
 import com.andre.medalert.ui.theme.MedAlertTextSecondary
 import com.andre.medalert.viewmodel.SettingsViewModel
-
+import androidx.compose.ui.platform.LocalContext
+import com.andre.medalert.notification.AlarmScheduler
 private val TextPrimary = Color.White
 
 @Composable
@@ -127,6 +128,15 @@ fun SettingsScreen(
             )
 
             SectionTitle("Conta")
+            val context = LocalContext.current
+
+            SectionTitle("Demonstração (temporário)")
+
+            SettingsNavigationRow(
+                icon = Icons.Default.Notifications,
+                label = "🧪 Testar alerta em 1 minuto",
+                onClick = { AlarmScheduler.scheduleTestAlarmIn1Minute(context) }
+            )
 
             SettingsNavigationRow(
                 icon = Icons.Default.Person,

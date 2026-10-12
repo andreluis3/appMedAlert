@@ -43,7 +43,7 @@ private val weekDayLabels = listOf("D", "S", "T", "Q", "Q", "S", "S")
 @Composable
 fun CalendarScreen(
     onNavigate: (String) -> Unit = {},
-    onDayClick: (Int) -> Unit = {}
+    onDayClick: (CalendarDay) -> Unit = {}
 ) {
     Scaffold(
         containerColor = MedAlertBackground,
@@ -93,7 +93,7 @@ fun CalendarScreen(
                         week.forEach { dayUi ->
                             CalendarDayCell(
                                 dayUi = dayUi,
-                                onClick = { dayUi.day?.let(onDayClick) },
+                                onClick = { onDayClick(dayUi) },
                                 modifier = Modifier.weight(1f)
                             )
                         }

@@ -37,6 +37,7 @@ import com.andre.medalert.ui.theme.MedAlertTextSecondary
 @Composable
 fun MedicationsScreen(
     medications: List<Medication> = MockData.medications,
+    errorMessage: String? = null,
     onNavigate: (String) -> Unit = {},
     onAddClick: () -> Unit = {},
     onEditClick: (Medication) -> Unit = {}
@@ -61,7 +62,29 @@ fun MedicationsScreen(
             Spacer(modifier = Modifier.height(4.dp))
             Text("Gerencie seus medicamentos", color = MedAlertTextSecondary, fontSize = 14.sp)
 
+            if (errorMessage != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(errorMessage, color = Color(0xFFE5484D), fontSize = 13.sp)
+            }
+
             Spacer(modifier = Modifier.height(20.dp))
+
+            if (medications.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MedAlertCard, shape = RoundedCornerShape(18.dp))
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "Nenhum medicamento cadastrado",
+                        color = MedAlertTextSecondary,
+                        fontSize = 14.sp
+                    )
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+            }
 
             medications.forEach { medication ->
                 MedicationCard(
@@ -109,6 +132,12 @@ private fun MedicationCard(
     onEditClick: () -> Unit,
     onDeleteClick: () -> Unit
 ) {
+    val detalhes = listOf(medication.dosage, medication.quantity)
+        .filter { it.isNotBlank() }
+        .joinToString(" • ")
+
+    val horariosTexto = medication.schedules.joinToString(" • ")
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -127,11 +156,13 @@ private fun MedicationCard(
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(medication.name, color = MedAlertTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                Text(
-                    "${medication.dosage} • ${medication.quantity}",
-                    color = MedAlertTextSecondary,
-                    fontSize = 13.sp
-                )
+                if (detalhes.isNotBlank()) {
+                    Text(
+                        detalhes,
+                        color = MedAlertTextSecondary,
+                        fontSize = 13.sp
+                    )
+                }
             }
 
             if (medication.active) {
@@ -145,11 +176,17 @@ private fun MedicationCard(
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        if (horariosTexto.isNotBlank() || medication.frequency.isNotBlank()) {
+            Spacer(modifier = Modifier.height(12.dp))
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            InfoChip(icon = Icons.Filled.AccessTime, text = medication.schedules.joinToString(" • "))
-            InfoChip(icon = Icons.Filled.Repeat, text = medication.frequency)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (horariosTexto.isNotBlank()) {
+                    InfoChip(icon = Icons.Filled.AccessTime, text = horariosTexto)
+                }
+                if (medication.frequency.isNotBlank()) {
+                    InfoChip(icon = Icons.Filled.Repeat, text = medication.frequency)
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(12.dp))

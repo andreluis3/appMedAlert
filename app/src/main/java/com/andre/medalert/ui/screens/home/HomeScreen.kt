@@ -28,6 +28,7 @@ import com.andre.medalert.data.mock.MockData
 import com.andre.medalert.data.model.DoseStatus
 import com.andre.medalert.data.model.MedicationDose
 import com.andre.medalert.ui.components.BottomNavigationBar
+import com.andre.medalert.ui.components.DosyLogo
 import com.andre.medalert.ui.theme.MedAlertBackground
 import com.andre.medalert.ui.theme.MedAlertCard
 import com.andre.medalert.ui.theme.MedAlertPrimary
@@ -116,44 +117,50 @@ fun HomeScreen(
 
 @Composable
 private fun HomeHeader(userName: String, onBellClick: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Top
-    ) {
-        Column {
-            Text(
-                text = "Olá, $userName 👋",
-                color = MedAlertTextPrimary,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "Seu próximo medicamento",
-                color = MedAlertTextSecondary,
-                fontSize = 14.sp
-            )
+    Column(modifier = Modifier.fillMaxWidth()) {
+
+        // Topo: logo Dosy discreta + sino de notificações
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            DosyLogo(height = 18.dp)
+
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .background(MedAlertCard, shape = CircleShape)
+                    .clickable(
+                        indication = null,
+                        interactionSource = remember { MutableInteractionSource() },
+                        onClick = onBellClick
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Notifications,
+                    contentDescription = "Notificações",
+                    tint = MedAlertPrimary,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
 
-        Box(
-            modifier = Modifier
-                .size(44.dp)
-                .background(MedAlertCard, shape = CircleShape)
-                .clickable(
-                    indication = null,
-                    interactionSource = remember { MutableInteractionSource() },
-                    onClick = onBellClick
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Notifications,
-                contentDescription = "Notificações",
-                tint = MedAlertPrimary,
-                modifier = Modifier.size(20.dp)
-            )
-        }
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "Olá, $userName 👋",
+            color = MedAlertTextPrimary,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "Seu próximo medicamento",
+            color = MedAlertTextSecondary,
+            fontSize = 14.sp
+        )
     }
 }
 

@@ -18,6 +18,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.andre.medalert.ui.components.DosyLogo
 import com.andre.medalert.ui.screens.login.FieldLabel
 import com.andre.medalert.ui.screens.login.MedAlertTextField
 import com.andre.medalert.ui.theme.MedAlertBackground
@@ -49,6 +50,10 @@ fun CadastroScreen(
             Spacer(modifier = Modifier.width(4.dp))
             Text("Voltar", color = MedAlertTextSecondary, fontSize = 14.sp)
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        DosyLogo(height = 36.dp)
 
         Spacer(modifier = Modifier.height(20.dp))
 

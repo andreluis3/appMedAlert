@@ -1,0 +1,72 @@
+TESTES MANUAIS - TELA "ALTERAR SENHA" (MedAlert)
+
+Pré-requisito: os 3 arquivos novos (ChangePasswordUiState, ChangePasswordViewModel,
+ChangePasswordScreen) criados e as alterações em UserDto, UserRepository e
+MainActivity aplicadas. Sync do Gradle feito.
+
+--------------------------------------------------
+1. NAVEGAÇÃO ATÉ A TELA
+--------------------------------------------------
+[ ] Abrir o app (Onboarding -> Login -> Home)
+[ ] Ir na aba Ajustes
+[ ] Clicar no card de perfil (nome/avatar) -> deve abrir a tela Perfil
+[ ] Na seção "Segurança", clicar em "Alterar senha"
+[ ] Verificar se abre a tela ChangePasswordScreen com os 3 campos:
+    Senha atual / Nova senha / Confirmar nova senha
+[ ] Clicar em "Voltar" -> deve retornar pro Perfil corretamente
+
+--------------------------------------------------
+2. VALIDAÇÃO DE CAMPOS VAZIOS
+--------------------------------------------------
+[ ] Clicar em "Salvar" com todos os campos vazios
+    -> Esperado: erro em "Senha atual" ("Informe a senha atual.")
+                 erro em "Nova senha" ("Informe a nova senha.")
+                 erro em "Confirmar nova senha" ("Confirme a nova senha.")
+[ ] Preencher apenas "Senha atual" e salvar
+    -> Esperado: erro some do campo preenchido, continua nos outros dois
+
+--------------------------------------------------
+3. VALIDAÇÃO DE REGRAS DA NOVA SENHA
+--------------------------------------------------
+[ ] Nova senha com menos de 6 caracteres (ex.: "123")
+    -> Esperado: "A nova senha deve ter pelo menos 6 caracteres."
+[ ] Nova senha igual à senha atual (ex.: ambas "123456")
+    -> Esperado: "A nova senha deve ser diferente da atual."
+[ ] Confirmar senha diferente da nova senha
+    -> Esperado: "As senhas não coincidem."
+[ ] Preencher tudo corretamente (senha atual diferente, nova >= 6 caracteres,
+    confirmação igual à nova)
+    -> Esperado: nenhum erro de validação, segue pro envio
+
+--------------------------------------------------
+4. COMPORTAMENTO DE ENVIO (endpoint ainda não existe)
+--------------------------------------------------
+[ ] Com os campos válidos, clicar em "Salvar"
+    -> Esperado: botão muda pra "Salvando..." brevemente
+    -> Esperado: como o backend não tem endpoint de troca de senha,
+       deve aparecer o FriendlyErrorDialog:
+       "Não foi possível alterar a senha"
+       "Não foi possível alterar sua senha agora. Tente novamente mais tarde."
+[ ] No dialog, clicar em "Cancelar" -> dialog fecha, tela continua a mesma
+[ ] Repetir o envio e clicar em "Tentar novamente" -> deve tentar de novo
+    e cair no mesmo erro (comportamento esperado até a API existir)
+
+--------------------------------------------------
+5. VISUAL / TEMA
+--------------------------------------------------
+[ ] Conferir se as cores dos campos batem com o resto do app
+    (MedAlertCard, MedAlertPrimary, MedAlertBackground)
+[ ] Conferir se os campos de senha mostram "•••••" (PasswordVisualTransformation)
+[ ] Girar o celular / testar em tela pequena -> conferir que o scroll funciona
+    e nada corta
+
+--------------------------------------------------
+6. REGRESSÃO (não quebrou nada existente)
+--------------------------------------------------
+[ ] Fluxo de Login continua funcionando normalmente
+[ ] Fluxo de Cadastro continua funcionando normalmente
+[ ] "Esqueci minha senha" no Perfil continua sem ação (ainda não implementado,
+    comportamento esperado nesta etapa)
+[ ] "Sair da conta" no Perfil continua funcionando
+[ ] Bottom navigation (Home, Remédios, Calendário, Histórico, Ajustes)
+    continua navegando normalmente
