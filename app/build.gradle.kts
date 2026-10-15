@@ -78,4 +78,7 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:33.5.0"))
     implementation("com.google.firebase:firebase-messaging-ktx")
     implementation("com.google.firebase:firebase-analytics-ktx")
+
+    // Jetpack DataStore (Para salvar o ID do usuário)
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
 }
