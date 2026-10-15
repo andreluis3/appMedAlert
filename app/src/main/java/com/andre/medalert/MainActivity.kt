@@ -32,15 +32,23 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.andre.medalert.data.mapper.toMedication
 import com.andre.medalert.data.mock.mockDashboardResponse
 import com.andre.medalert.state.AdherenceUiState
 import com.andre.medalert.ui.screens.adherence.AdherenceScreen
 import com.andre.medalert.ui.screens.notifications.NotificationScreen
 import com.andre.medalert.ui.screens.responsibles.AddResponsibleScreen
+import com.andre.medalert.ui.screens.responsibles.CaregiverRequestScreen
 import com.andre.medalert.ui.screens.responsibles.ResponsiblesScreen
 import com.andre.medalert.ui.screens.profile.ProfileScreen
 import com.andre.medalert.ui.screens.profile.ChangePasswordScreen
+import com.andre.medalert.viewmodel.MedicationViewModel
 import kotlinx.coroutines.delay
+
+// TEMPORÁRIO: enquanto o login não devolve/guarda o userId (Etapa 3: JWT + DataStore),
+// usamos um id fixo para testar o Room. Trocar pelo userId real do usuário logado.
+private const val TEMP_USER_ID = 1
 
 class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher =
@@ -123,8 +131,37 @@ class MainActivity : ComponentActivity() {
                         )
                     }
 
+                    // Tela de confirmação da solicitação de cuidador.
+                    // Hoje usa dados MOCK (MockCaregiverRequestRepository).
+                    // Etapa futura: abrir esta rota ao tocar na notificação (sininho / push FCM).
+                    composable(
+                        route = "caregiverRequest/{requestId}",
+                        arguments = listOf(
+                            navArgument("requestId") { type = NavType.StringType }
+                        )
+                    ) {
+                        CaregiverRequestScreen(
+                            onBackClick = { navController.popBackStack() }
+                        )
+                    }
+
                     composable("medications") {
+                        // A tela observa o Room (offline-first). A API só atualiza o Room.
+                        val medicationViewModel: MedicationViewModel = viewModel()
+
+                        LaunchedEffect(Unit) {
+                            medicationViewModel.setUser(TEMP_USER_ID)
+                        }
+
+                        val medicationEntities by medicationViewModel.medications.collectAsState()
+                        val errorMessage by medicationViewModel.error.collectAsState()
+                        val medications = remember(medicationEntities) {
+                            medicationEntities.map { it.toMedication() }
+                        }
+
                         MedicationsScreen(
+                            medications = medications,
+                            errorMessage = errorMessage,
                             onNavigate = navigateToTab,
                             onAddClick = { navController.navigate("addMedication") },
                             onEditClick = {
