@@ -16,6 +16,8 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Medication
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,21 +33,52 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.andre.medalert.ui.components.DosyLogo
 import com.andre.medalert.ui.theme.MedAlertBackground
 import com.andre.medalert.ui.theme.MedAlertCard
 import com.andre.medalert.ui.theme.MedAlertPrimary
 import com.andre.medalert.ui.theme.MedAlertTextPrimary
 import com.andre.medalert.ui.theme.MedAlertTextSecondary
+import com.andre.medalert.viewmodel.LoginUiState
+import com.andre.medalert.viewmodel.LoginViewModel
 
 @Composable
 fun LoginScreen(
     onBackClick: () -> Unit = {},
-    onLoginClick: () -> Unit = {},
-    onCreateAccountClick: () -> Unit = {}
+    // Chamado quando o login deu certo (userId e token já foram salvos no DataStore).
+    // Aqui você navega para a Home no MainActivity.
+    onLoginSuccess: () -> Unit = {},
+    onCreateAccountClick: () -> Unit = {},
+    viewModel: LoginViewModel = viewModel()
 ) {
     var email by remember { mutableStateOf("") }
     var senha by remember { mutableStateOf("") }
+
+    val uiState by viewModel.uiState.collectAsState()
+    val isLoading = uiState is LoginUiState.Loading
+
+    // Quando o estado vira Success, navega e volta o ViewModel para Idle.
+    LaunchedEffect(uiState) {
+        if (uiState is LoginUiState.Success) {
+            onLoginSuccess()
+            viewModel.resetState()
+        }
+    }
+
+    // Erro amigável em Dialog (não só Toast).
+    (uiState as? LoginUiState.Error)?.let { error ->
+        AlertDialog(
+            onDismissRequest = { viewModel.resetState() },
+            title = { Text("Não foi possível entrar") },
+            text = { Text(error.message) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.resetState() }) {
+                    Text("OK")
+                }
+            }
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -107,15 +140,26 @@ fun LoginScreen(
         Spacer(modifier = Modifier.height(24.dp))
 
         Button(
-            onClick = onLoginClick,
+            onClick = { viewModel.login(email, senha) },
+            enabled = !isLoading,
             modifier = Modifier.fillMaxWidth().height(56.dp),
             shape = RoundedCornerShape(28.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MedAlertPrimary,
-                contentColor = MedAlertBackground
+                contentColor = MedAlertBackground,
+                disabledContainerColor = MedAlertPrimary,
+                disabledContentColor = MedAlertBackground
             )
         ) {
-            Text("Entrar", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(22.dp),
+                    color = MedAlertBackground,
+                    strokeWidth = 2.dp
+                )
+            } else {
+                Text("Entrar", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))

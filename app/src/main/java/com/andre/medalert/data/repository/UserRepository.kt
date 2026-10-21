@@ -13,6 +13,12 @@ import com.andre.medalert.data.remote.dto.toDomain
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * Login recusado pelo backend. Ele responde HTTP 200 com {"message": "..."} quando
+ * o e-mail não existe ou a senha está errada, então não chega como HttpException.
+ */
+class InvalidCredentialsException(message: String? = null) : Exception(message)
+
 class UserRepository(
     private val api: ApiService = RetrofitClient.instance,
     private val userPreferences: UserPreferencesRepository
@@ -28,15 +34,25 @@ class UserRepository(
 
     /**
      * Faz o login na API e, em caso de sucesso, salva userId e token no DataStore.
-     * Em caso de falha devolve Result.failure com a exceção original
-     * (HttpException, IOException etc.) para o ViewModel traduzir em mensagem.
+     *
+     * O backend devolve HTTP 200 mesmo com senha errada (corpo: {"message": "..."}),
+     * por isso o sucesso é decidido pelo conteúdo: só vale se vier um userId > 0.
+     * Em caso de falha devolve Result.failure:
+     *  - InvalidCredentialsException: 200 sem userId (e-mail/senha errados ou conta inexistente)
+     *  - HttpException / IOException etc.: o ViewModel traduz em mensagem amigável
      */
     suspend fun login(email: String, senha: String): Result<User> {
         return try {
             val response = api.login(LoginRequest(email = email, senha = senha))
-            val user = response.toDomain()
-            userPreferences.saveSession(userId = user.id, token = user.token)
-            Result.success(user)
+            val id = response.userId
+
+            if (id == null || id <= 0) {
+                Result.failure<User>(InvalidCredentialsException(response.message))
+            } else {
+                val user = response.toDomain()
+                userPreferences.saveSession(userId = user.id, token = user.token)
+                Result.success(user)
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

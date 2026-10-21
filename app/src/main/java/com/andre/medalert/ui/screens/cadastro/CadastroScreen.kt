@@ -1,5 +1,6 @@
 package com.andre.medalert.ui.screens.cadastro
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -13,11 +14,13 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.andre.medalert.ui.components.DosyLogo
 import com.andre.medalert.ui.screens.login.FieldLabel
 import com.andre.medalert.ui.screens.login.MedAlertTextField
@@ -25,17 +28,52 @@ import com.andre.medalert.ui.theme.MedAlertBackground
 import com.andre.medalert.ui.theme.MedAlertPrimary
 import com.andre.medalert.ui.theme.MedAlertTextPrimary
 import com.andre.medalert.ui.theme.MedAlertTextSecondary
+import com.andre.medalert.viewmodel.RegisterUiState
+import com.andre.medalert.viewmodel.RegisterViewModel
 
 @Composable
 fun CadastroScreen(
     onBackClick: () -> Unit = {},
-    onCreateAccountClick: () -> Unit = {},
-    onLoginClick: () -> Unit = {}
+    // Chamado quando a conta foi criada com sucesso. No MainActivity, navega para o Login.
+    onRegisterSuccess: () -> Unit = {},
+    onLoginClick: () -> Unit = {},
+    viewModel: RegisterViewModel = viewModel(factory = RegisterViewModel.Factory)
 ) {
     var nome by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var senha by remember { mutableStateOf("") }
     var confirmarSenha by remember { mutableStateOf("") }
+
+    val uiState by viewModel.uiState.collectAsState()
+    val isSaving = uiState is RegisterUiState.Loading
+    val context = LocalContext.current
+
+    // Quando o estado vira Success: avisa o usuário, navega para o Login e zera o ViewModel.
+    LaunchedEffect(uiState) {
+        if (uiState is RegisterUiState.Success) {
+            Toast.makeText(
+                context,
+                "Conta criada! Entre com seu e-mail e senha.",
+                Toast.LENGTH_LONG
+            ).show()
+            onRegisterSuccess()
+            viewModel.resetState()
+        }
+    }
+
+    // Erro (validação, 500, sem internet...) em Dialog.
+    (uiState as? RegisterUiState.Error)?.let { error ->
+        AlertDialog(
+            onDismissRequest = { viewModel.resetState() },
+            title = { Text("Não foi possível criar a conta") },
+            text = { Text(error.message) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.resetState() }) {
+                    Text("OK")
+                }
+            }
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -100,15 +138,26 @@ fun CadastroScreen(
         Spacer(modifier = Modifier.height(24.dp))
 
         Button(
-            onClick = onCreateAccountClick,
+            onClick = { viewModel.register(nome, email, senha, confirmarSenha) },
+            enabled = !isSaving,
             modifier = Modifier.fillMaxWidth().height(56.dp),
             shape = RoundedCornerShape(28.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MedAlertPrimary,
-                contentColor = MedAlertBackground
+                contentColor = MedAlertBackground,
+                disabledContainerColor = MedAlertPrimary,
+                disabledContentColor = MedAlertBackground
             )
         ) {
-            Text("Criar conta", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            if (isSaving) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(22.dp),
+                    color = MedAlertBackground,
+                    strokeWidth = 2.dp
+                )
+            } else {
+                Text("Criar conta", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            }
         }
 
         Spacer(modifier = Modifier.height(20.dp))

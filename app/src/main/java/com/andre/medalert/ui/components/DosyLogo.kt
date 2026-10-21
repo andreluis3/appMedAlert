@@ -31,7 +31,7 @@ import androidx.compose.foundation.layout.height
 fun DosyLogo(
     modifier: Modifier = Modifier,
     height: Dp = 32.dp,
-    withBackground: Boolean = true
+    withBackground: Boolean = false
 ) {
     if (withBackground) {
         Box(

@@ -81,4 +81,8 @@ dependencies {
 
     // Jetpack DataStore (Para salvar o ID do usuário)
     implementation("androidx.datastore:datastore-preferences:1.1.1")
+    // para sistema de login
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+    // para notificações de login
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 }
