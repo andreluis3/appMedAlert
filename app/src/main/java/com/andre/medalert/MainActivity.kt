@@ -18,7 +18,7 @@ import com.andre.medalert.ui.screens.login.LoginScreen
 import com.andre.medalert.ui.screens.onboarding.OnboardingScreen
 import com.andre.medalert.ui.screens.settings.SettingsScreen
 import com.andre.medalert.ui.theme.MedAlertTheme
-import com.andre.medalert.ui.screens.medications.AddMedicationScreen
+import com.andre.medalert.ui.components.CustomTimePickerDialog
 import com.andre.medalert.ui.screens.medications.MedicationsScreen
 import android.Manifest
 import android.content.pm.PackageManager
@@ -37,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.mapper.toMedication
@@ -54,6 +55,7 @@ import com.andre.medalert.viewmodel.MedicationViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import com.andre.medalert.ui.screens.meds.CadastroMedScreen
 
 class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher =
@@ -210,24 +212,27 @@ class MainActivity : ComponentActivity() {
                             medications = medications,
                             errorMessage = errorMessage,
                             onNavigate = navigateToTab,
-                            onAddClick = { navController.navigate("addMedication") },
-                            onEditClick = {
-                                // Etapa futura: navegar pra addMedication passando o medicamento
-                                // pra reaproveitar a tela no modo "Editar".
-                            }
+                            onAddClick = { navController.navigate("cadastro_med") },
+                            onEditClick = { /* ... */ }
+                        )
+
+                    }
+
+// 2. ADICIONADO: Rota para a nova tela de cadastro real
+                    composable("cadastro_med") {
+                        CadastroMedScreen(
+                            onSuccess = {
+                                // Volta para a Home e limpa a pilha para evitar loops
+                                navController.navigate("home") {
+                                    popUpTo("home") { inclusive = false }
+                                    launchSingleTop = true
+                                }
+                            },
+                            onBackClick = { navController.popBackStack() }
                         )
                     }
 
-                    composable("addMedication") {
-                        AddMedicationScreen(
-                            onBackClick = { navController.popBackStack() },
-                            onSaveClick = {
-                                // Simulação por enquanto: só volta pra tela de Remédios.
-                                // Quando tivermos Repository, aqui entra o salvamento real.
-                                navController.popBackStack()
-                            }
-                        )
-                    }
+
 
                     composable("calendar") {
                         CalendarScreen(

@@ -1,19 +1,21 @@
 package com.andre.medalert.data.remote.dto
 
-data class MedicamentoData(
-    val nome: String,
-    val dataInicio: String,
-    val dataFim: String,
-    val dosagem: Int,
-    val frequencia: Int,
-    val quantidade: Int,
-    val unidadeDosagem: String,
-    val unidadeQuantidade: String,
-    val userId: Int
-)
+import com.google.gson.annotations.SerializedName
 
-data class CreateMedicamentoRequest(
-    val data: MedicamentoData
+/**
+ * Corpo do POST /api/meds (JSON FLAT, sem wrapper "data").
+ * Datas no formato "yyyy-MM-dd HH:mm:ss-03:00".
+ */
+data class MedicamentoData(
+    @SerializedName("nome") val nome: String,
+    @SerializedName("dataInicio") val dataInicio: String,
+    @SerializedName("dataFim") val dataFim: String,
+    @SerializedName("dosagem") val dosagem: Int,
+    @SerializedName("frequencia") val frequencia: Int,
+    @SerializedName("quantidade") val quantidade: Int,
+    @SerializedName("unidadeDosagem") val unidadeDosagem: String,
+    @SerializedName("unidadeQuantidade") val unidadeQuantidade: String,
+    @SerializedName("userId") val userId: Int
 )
 
 data class MedicamentoResponse(

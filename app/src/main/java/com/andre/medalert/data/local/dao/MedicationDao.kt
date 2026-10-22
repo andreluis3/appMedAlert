@@ -25,6 +25,10 @@ abstract class MedicationDao {
     @Query("UPDATE medications SET isSynced = 1 WHERE id = :id")
     abstract suspend fun markSynced(id: Long)
 
+    @Query("DELETE FROM medications WHERE id = :id")
+    abstract suspend fun deleteById(id: Long)
+
+    //delete from id avisar ao kayky
     @Query("DELETE FROM medications WHERE userId = :userId AND isSynced = 1")
     abstract suspend fun deleteSyncedByUser(userId: Int)
 

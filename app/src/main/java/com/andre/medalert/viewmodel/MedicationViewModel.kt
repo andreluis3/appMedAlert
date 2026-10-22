@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.andre.medalert.data.local.AppDatabase
+import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.local.entity.MedicationEntity
 import com.andre.medalert.data.remote.dto.MedicamentoData
 import com.andre.medalert.data.repository.MedicationRepository
@@ -19,10 +20,11 @@ import kotlinx.coroutines.launch
 class MedicationViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = MedicationRepository(
-        dao = AppDatabase.getInstance(application).medicationDao()
+        dao = AppDatabase.getInstance(application).medicationDao(),
+        userPrefs = UserPreferencesRepository(application)
     )
 
-    // Enquanto não há login/DataStore (Etapa 3), quem chama informa o userId.
+    // Quem chama informa o userId (vem do DataStore na MainActivity).
     private val userId = MutableStateFlow<Int?>(null)
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -55,13 +57,7 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    fun saveMedication(data: MedicamentoData) {
-        viewModelScope.launch {
-            repository.saveMedication(data).onFailure {
-                _error.value = "Medicamento salvo no celular. Será enviado quando houver internet."
-            }
-        }
-    }
+
 
     fun clearError() {
         _error.value = null

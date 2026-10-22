@@ -32,7 +32,7 @@ abstract class AppDatabase : RoomDatabase() {
                 )
                     // Fase de desenvolvimento: se mudar o schema, recria o banco.
                     // Antes de publicar, trocar por Migrations de verdade.
-                    .fallbackToDestructiveMigration()
+                    .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                     .also { INSTANCE = it }
             }
