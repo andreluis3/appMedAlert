@@ -113,7 +113,7 @@ fun CadastroScreen(
         Spacer(modifier = Modifier.height(28.dp))
 
         FieldLabel("Nome")
-        MedAlertTextField(value = nome, onValueChange = { nome = it }, placeholder = "André Santos")
+        MedAlertTextField(value = nome, onValueChange = { nome = it }, placeholder = "Digite seu nome")
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -121,19 +121,19 @@ fun CadastroScreen(
         MedAlertTextField(
             value = email,
             onValueChange = { email = it },
-            placeholder = "andre.santos@email.com",
+            placeholder = "",
             keyboardType = KeyboardType.Email
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
         FieldLabel("Senha")
-        MedAlertTextField(value = senha, onValueChange = { senha = it }, placeholder = "••••••", isPassword = true)
+        MedAlertTextField(value = senha, onValueChange = { senha = it }, placeholder = "", isPassword = true)
 
         Spacer(modifier = Modifier.height(16.dp))
 
         FieldLabel("Confirmar senha")
-        MedAlertTextField(value = confirmarSenha, onValueChange = { confirmarSenha = it }, placeholder = "••••••", isPassword = true)
+        MedAlertTextField(value = confirmarSenha, onValueChange = { confirmarSenha = it }, placeholder = "", isPassword = true)
 
         Spacer(modifier = Modifier.height(24.dp))
 

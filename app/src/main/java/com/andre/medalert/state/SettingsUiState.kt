@@ -1,8 +1,8 @@
 package com.andre.medalert.state
 
 data class SettingsUiState(
-    val userName: String = "André Santos",
-    val userEmail: String = "andre.santos@email.com",
+    val userName: String = "",
+    val userEmail: String = "",
     val medicationReminders: Boolean = true,
     val alertSound: Boolean = true,
     val largeText: Boolean = false,

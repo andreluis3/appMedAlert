@@ -204,7 +204,7 @@ fun CadastroMedScreen(
                 MedAlertTextField(
                     value = dosagem,
                     onValueChange = { dosagem = it.filter(Char::isDigit) },
-                    placeholder = "500",
+                    placeholder = "",
                     keyboardType = KeyboardType.Number
                 )
             }
@@ -213,7 +213,7 @@ fun CadastroMedScreen(
                 MedAlertTextField(
                     value = quantidade,
                     onValueChange = { quantidade = it.filter(Char::isDigit) },
-                    placeholder = "20",
+                    placeholder = "",
                     keyboardType = KeyboardType.Number
                 )
             }

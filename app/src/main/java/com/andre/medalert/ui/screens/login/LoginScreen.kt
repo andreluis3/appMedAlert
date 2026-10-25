@@ -121,7 +121,7 @@ fun LoginScreen(
         MedAlertTextField(
             value = email,
             onValueChange = { email = it },
-            placeholder = "andre.santos@email.com",
+            placeholder = "",
             leadingIcon = Icons.Filled.Email,
             keyboardType = KeyboardType.Email
         )
@@ -132,7 +132,7 @@ fun LoginScreen(
         MedAlertTextField(
             value = senha,
             onValueChange = { senha = it },
-            placeholder = "••••••",
+            placeholder = "",
             leadingIcon = Icons.Filled.Lock,
             isPassword = true
         )
