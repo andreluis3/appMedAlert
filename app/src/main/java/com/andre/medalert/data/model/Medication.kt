@@ -3,6 +3,10 @@ package com.andre.medalert.data.model
 /**
  * Representa um medicamento cadastrado.
  * Pensado já com os campos que o backend/Room vai precisar futuramente.
+ *
+ * [localId] é o id da linha no Room (MedicationEntity.id). É por ele que a tela pede
+ * editar e excluir ao repository; o ID do backend (remoteId) fica só no repository.
+ * Tem valor padrão para não quebrar quem já cria Medication(...) (ex.: MockData).
  */
 data class Medication(
     val id: String,
@@ -14,7 +18,8 @@ data class Medication(
     val startDate: String? = null,
     val endDate: String? = null,
     val notes: String? = null,
-    val active: Boolean = true
+    val active: Boolean = true,
+    val localId: Long = 0L
 )
 
 enum class DoseStatus {

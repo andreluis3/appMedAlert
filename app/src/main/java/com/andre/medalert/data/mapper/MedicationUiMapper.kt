@@ -8,6 +8,9 @@ import com.andre.medalert.data.model.Medication
  * Banco local -> model usado pela UI.
  * Campos que a API não devolve (quantidade, frequência) ficam vazios
  * e a tela simplesmente não mostra.
+ *
+ * localId = id da linha no Room: é o que a tela devolve ao pedir editar/excluir.
+ * O ID do backend (remoteId) NÃO sai do repository.
  */
 fun MedicationEntity.toMedication(): Medication {
     val horarios = horariosLista()
@@ -27,6 +30,7 @@ fun MedicationEntity.toMedication(): Medication {
         frequency = if (horarios.isNotEmpty()) "${horarios.size}x ao dia" else "",
         startDate = dataInicio,
         endDate = dataFim,
-        active = true
+        active = true,
+        localId = id
     )
 }

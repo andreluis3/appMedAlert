@@ -9,9 +9,12 @@ import com.andre.medalert.data.local.dao.MedicationDao
 import com.andre.medalert.data.local.entity.DoseHistoryEntity
 import com.andre.medalert.data.local.entity.MedicationEntity
 
+// version = 2: MedicationEntity ganhou a coluna remoteId.
+// Com fallbackToDestructiveMigration o banco local é recriado (em desenvolvimento
+// isso apaga medicamentos que ainda não tinham sido enviados à API).
 @Database(
     entities = [MedicationEntity::class, DoseHistoryEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

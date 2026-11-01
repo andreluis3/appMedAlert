@@ -4,37 +4,73 @@ import com.andre.medalert.data.remote.dto.*
 import okhttp3.ResponseBody
 import retrofit2.http.*
 
+/**
+ * Prefixo "api/" confirmado no Postman (ex.: https://dosy-xi.vercel.app/api/users/login).
+ * Rotas de /historys e /notification seguem o mesmo roteador; confirme no primeiro teste de cada uma.
+ * NUNCA coloque o CRON_SECRET aqui: GET /api/notification é chamado só pelo cron da Vercel.
+ */
 interface ApiService {
 
-    // O backend responde só o ID em texto puro (ex.: 11), não um objeto JSON.
-    // Por isso o retorno é ResponseBody e o parse é feito no UserRepository.
-    @POST("api/users")
-    suspend fun createUser(@Body request: CreateUserRequest): ResponseBody
+    // ---------- Usuários ----------
 
-    // Sucesso: ID puro (ex.: 10). Falha: 200 com {"message": "..."}.
+    // 201: ID numérico em texto puro (ex.: 4). 409: e-mail já existe. Body FLAT (sem wrapper "data").
+    @POST("api/users")
+    suspend fun createUser(@Body request: UserData): ResponseBody
+
+    // 200 paciente: {"id":1,"tipo":"paciente"} | cuidador: {"id":3,"tipo":"cuidador","pacienteId":1}
+    // 401: e-mail ou senha incorretos. O parse tolerante fica no UserRepository.
     @POST("api/users/login")
     suspend fun login(@Body request: LoginRequest): ResponseBody
 
-    // A documentação não mostra o corpo de resposta deste endpoint,
-    // por isso ele não retorna nada (igual createMedicamento/createHistory).
-    @POST("api/users/cuid")
-    suspend fun createCuidador(@Body request: CreateCuidadorRequest)
+    // 201: ID numérico do cuidador.
+    @POST("api/users/cuidador")
+    suspend fun createCuidador(@Body request: CreateCuidadorRequest): ResponseBody
 
-    // JSON FLAT (sem wrapper "data"). Confirmado no Postman: 201 Created.
-    // A documentação da API diz que precisa do wrapper, mas o servidor real responde 500 com ele.
+    // Salva o token FCM do cuidador.
+    @POST("api/users/token")
+    suspend fun saveFcmToken(@Body request: SaveFcmTokenRequest): ResponseBody
+
+    // Paciente convida cuidador (backend envia push).
+    @POST("api/users/requestCuidador")
+    suspend fun requestCuidador(@Body request: RequestCuidadorRequest): ResponseBody
+
+    // Cuidador aceita paciente. O campo se chama "pacientId" na README (grafia mantida).
+    @POST("api/users/accept")
+    suspend fun acceptPaciente(@Body request: AcceptPacienteRequest): ResponseBody
+
+    // ---------- Medicamentos ----------
+
+    // {usuarioId} = ID do PACIENTE.
+    @GET("api/meds/{usuarioId}")
+    suspend fun getMedicamentos(@Path("usuarioId") usuarioId: Int): List<MedicamentoResponse>
+
+    // JSON flat em snake_case. 201 devolve o objeto criado (usamos só o id).
     @POST("api/meds")
-    suspend fun createMedicamento(@Body request: MedicamentoData)
+    suspend fun createMedicamento(@Body request: MedicamentoData): MedicamentoCriadoDto?
 
-    @GET("api/meds/{userId}")
-    suspend fun getMedicamentos(@Path("userId") userId: Int): List<MedicamentoResponse>
+    // Formato obrigatório: {"id": <ID DO MEDICAMENTO>, "data": {campos a alterar}}
+    @POST("api/meds/edit")
+    suspend fun editMedicamento(@Body request: EditMedicamentoRequest): ResponseBody
 
+    // {medicamentoId} = ID do MEDICAMENTO. Apaga também histórico e horários (cascade).
+    @DELETE("api/meds/{medicamentoId}")
+    suspend fun deleteMedicamento(@Path("medicamentoId") medicamentoId: Int): ResponseBody
+
+    // ---------- Histórico ----------
+
+    // TODO (etapa de histórico): o body da README é flat em snake_case
+    // (usuario_id, medicamento_id, previsto_para, status...). Este DTO ainda é o antigo.
     @POST("api/historys")
     suspend fun createHistory(@Body request: CreateHistoryRequest)
 
-    // O backend espera corpo JSON num GET - por isso @HTTP com hasBody, em vez de @GET normal.
+    // Doses de hoje do paciente.
+    @GET("api/historys/doseDia/{usuarioId}")
+    suspend fun getDosesDia(@Path("usuarioId") usuarioId: Int): List<HistoryRecordDto>
+
+    @Deprecated("Rota inexistente na README. Use getDosesDia(). Apagar quando nada mais chamar.")
     @HTTP(method = "GET", path = "api/historys", hasBody = true)
     suspend fun getHistory(@Body request: HistoryQueryRequest): List<HistoryRecordDto>
 
-    @GET("api/historys/dashboard")
-    suspend fun getDashboard(@Query("id") userId: Int): DashboardResponse
+    @GET("api/historys/dashboard/{usuarioId}")
+    suspend fun getDashboard(@Path("usuarioId") userId: Int): DashboardResponse
 }

@@ -9,20 +9,27 @@ data class LoginRequest(
     @SerializedName("senha") val senha: String
 )
 
-// O que o servidor DEVOLVE para você.
-// Todos os campos são opcionais porque o backend responde HTTP 200 também quando o
-// login falha; nesse caso o corpo traz só {"message": "..."} (sem userId).
-// Quem decide se foi sucesso é o UserRepository, olhando o userId.
+/**
+ * O que o servidor DEVOLVE (README): {"id":1,"tipo":"paciente"}
+ * ou {"id":3,"tipo":"cuidador","pacienteId":1}.
+ * Todos opcionais: versões antigas devolviam só um número ou {"message": "..."}.
+ * Quem decide se foi sucesso é o UserRepository, olhando o id.
+ */
 data class LoginResponse(
-    @SerializedName("userId") val userId: Int? = null,
+    @SerializedName("id") val id: Int? = null,
+    @SerializedName("tipo") val tipo: String? = null,
+    @SerializedName(value = "pacienteId", alternate = ["paciente_id", "pacientId"])
+    val pacienteId: Int? = null,
     @SerializedName("nome") val nome: String? = null,
     @SerializedName("token") val token: String? = null,
     @SerializedName("message") val message: String? = null
 )
 
-// Mapper DTO -> domínio (só chame depois de validar que userId existe e é > 0)
+// Só chame depois de validar que id existe e é > 0.
 fun LoginResponse.toDomain(): User = User(
-    id = userId ?: 0,
+    id = id ?: 0,
     nome = nome.orEmpty(),
-    token = token
+    token = token,
+    tipo = tipo ?: "paciente",
+    pacienteId = pacienteId
 )

@@ -6,7 +6,6 @@ import androidx.lifecycle.viewModelScope
 import com.andre.medalert.data.local.AppDatabase
 import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.local.entity.MedicationEntity
-import com.andre.medalert.data.remote.dto.MedicamentoData
 import com.andre.medalert.data.repository.MedicationRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +26,7 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
     // Quem chama informa o userId (vem do DataStore na MainActivity).
     private val userId = MutableStateFlow<Int?>(null)
 
+    // A tela observa SEMPRE o Room: quando o refresh grava na tabela, a lista atualiza sozinha.
     @OptIn(ExperimentalCoroutinesApi::class)
     val medications: StateFlow<List<MedicationEntity>> = userId
         .flatMapLatest { id -> if (id == null) emptyFlow() else repository.observeMedications(id) }
@@ -47,17 +47,21 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
 
     fun refresh() {
         val id = userId.value ?: return
+        if (_isRefreshing.value) return // evita dois refresh ao mesmo tempo
         viewModelScope.launch {
             _isRefreshing.value = true
-            repository.refresh(id).onFailure {
-                // Offline: continua mostrando o que está no Room.
-                _error.value = "Não foi possível atualizar. Mostrando dados salvos no celular."
-            }
+            repository.refresh(id)
+                .onSuccess {
+                    // Um refresh bem-sucedido apaga o aviso de erro anterior.
+                    _error.value = null
+                }
+                .onFailure {
+                    // Offline ou erro do servidor: continua mostrando o que está no Room.
+                    _error.value = "Não foi possível atualizar. Mostrando dados salvos no celular."
+                }
             _isRefreshing.value = false
         }
     }
-
-
 
     fun clearError() {
         _error.value = null
