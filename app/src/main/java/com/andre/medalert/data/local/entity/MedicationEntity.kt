@@ -1,5 +1,6 @@
 package com.andre.medalert.data.local.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -7,71 +8,162 @@ import androidx.room.PrimaryKey
 /**
  * Medicamento guardado no celular.
  *
- * - [id] é LOCAL (autogerado). Agora ele é ESTÁVEL: o refresh da API reaproveita o mesmo id
- *   para o mesmo [remoteId], então a tela pode guardar o id local sem ele "sumir" depois.
- * - [remoteId] é o ID do medicamento no backend. É ELE que vai em editar e excluir.
- *   null = ainda não enviado (criado offline).
- * - Vindo da API (GET /api/meds/:usuarioId): nome, dosagem (texto), horários e remoteId.
- *   Os demais campos (datas, frequência, quantidade, unidades) a API NÃO devolve: ficam como
- *   estavam no celular (veja [preservingDetailsFrom]) ou null se nunca foram conhecidos.
- *   null = desconhecido; nunca significa vazio nem zero.
- * - Criado no app: guarda os campos do POST /api/meds e isSynced = false até a API confirmar.
+ * - id é LOCAL e autogerado.
+ * - remoteId é o ID do medicamento no backend.
+ * - dosagem é o texto exibido ("2.5 mg"); dosagemValor é o número (Double, preserva decimais).
+ * - dataInicio/dataFim armazenam as datas do tratamento.
+ * - horarioDose armazena o horário inicial da primeira dose, SEMPRE em "HH:mm".
+ * - horarios armazena a lista de horários retornada/calculada pelo backend.
  */
 @Entity(
     tableName = "medications",
     indices = [Index("userId")]
 )
 data class MedicationEntity(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+
     val userId: Int,
     val nome: String,
-    val dosagem: String,              // texto para exibir, ex.: "500 mg"
-    val horarios: String = "",        // horários separados por vírgula, ex.: "08:00,16:00"
+    val dosagem: String,
+
+    val horarios: String = "",
+
+    @ColumnInfo(name = "horario_dose")
+    val horarioDose: String? = null,
+
     val dataInicio: String? = null,
     val dataFim: String? = null,
-    val dosagemValor: Int? = null,
+
+    val dosagemValor: Double? = null,
     val frequencia: Int? = null,
     val quantidade: Int? = null,
+
     val unidadeDosagem: String? = null,
     val unidadeQuantidade: String? = null,
+
     val isSynced: Boolean = false,
-    val remoteId: Int? = null
+    val remoteId: Int? = null,
+
+    val estoque: Int? = null,
+    val estoqueMinimo: Int? = null,
+    val observacoes: String? = null,
+
+    @ColumnInfo(defaultValue = "1")
+    val ativo: Boolean = true
 )
 
-/** Horários como lista (a coluna guarda tudo numa string separada por vírgula). */
+/**
+ * Converte a coluna de horários em uma lista.
+ * Os horários são armazenados separados por vírgula.
+ */
 fun MedicationEntity.horariosLista(): List<String> =
-    if (horarios.isBlank()) emptyList() else horarios.split(",")
+    if (horarios.isBlank()) {
+        emptyList()
+    } else {
+        horarios.split(",")
+    }
 
-private fun String.normalizado(): String = trim().lowercase().replace(Regex("\\s+"), " ")
+private fun String.normalizado(): String =
+    trim()
+        .lowercase()
+        .replace(Regex("\\s+"), " ")
 
 /**
- * Usado no refresh: [this] é o registro NOVO (resumido) vindo da API e [previous] é o que já
- * estava no Room para o mesmo remoteId.
+ * Mantém a hora local antiga quando a API devolve a mesma data.
  *
- * - nome, dosagem (texto), horários e isSynced vêm sempre da API (ela é a fonte da verdade).
- * - O id local é mantido.
- * - Os detalhes que a API não devolve (datas, frequência, quantidade, unidade da quantidade)
- *   são preservados do registro anterior.
- * - dosagemValor/unidadeDosagem só são preservados se o texto da dosagem da API ainda bater com
- *   o que tínhamos; se divergir (alguém mudou em outro lugar), viram null (desconhecido)
- *   em vez de manter um valor desatualizado.
- *
- * Limite conhecido: se frequência, quantidade ou datas forem alteradas fora deste aparelho, a API
- * não avisa e o celular continua com o valor antigo até o usuário editar por aqui.
+ * Compatibilidade com registros antigos que guardavam a hora em dataInicio.
  */
-fun MedicationEntity.preservingDetailsFrom(previous: MedicationEntity?): MedicationEntity {
+private fun mantemHoraLocal(
+    api: String?,
+    local: String?
+): String? {
+    return if (
+        api != null &&
+        local != null &&
+        api.take(10) == local.take(10)
+    ) {
+        local
+    } else {
+        api
+    }
+}
+
+/**
+ * Mescla o registro recebido da API com o registro que já estava no Room.
+ *
+ * A dosagem agora vem derivada no mapper (dosagem_valor ou número do texto), então o valor da
+ * API tem prioridade; o valor anterior só é reaproveitado quando a API não trouxe nada e o
+ * texto da dosagem continua igual.
+ * O horarioDose da API já chega normalizado ("HH:mm") ou null (aí vale o do aparelho).
+ */
+fun MedicationEntity.preservingDetailsFrom(
+    previous: MedicationEntity?
+): MedicationEntity {
+
     if (previous == null) return this
-    val dosagemConfere = previous.dosagemValor != null &&
-            previous.unidadeDosagem != null &&
-            previous.dosagem.normalizado() == dosagem.normalizado()
+
+    val dosagemConfere =
+        previous.dosagemValor != null &&
+                previous.unidadeDosagem != null &&
+                previous.dosagem.normalizado() == dosagem.normalizado()
+
+    // Resposta da API com frequência preenchida.
+    if (frequencia != null) {
+        return copy(
+            id = previous.id,
+
+            horarios = horarios.ifBlank { previous.horarios },
+            horarioDose = horarioDose ?: previous.horarioDose,
+
+            dataInicio = mantemHoraLocal(
+                dataInicio,
+                previous.dataInicio
+            ),
+            dataFim = mantemHoraLocal(
+                dataFim,
+                previous.dataFim
+            ),
+
+            quantidade = quantidade ?: previous.quantidade,
+            unidadeQuantidade = unidadeQuantidade ?: previous.unidadeQuantidade,
+
+            estoque = estoque ?: previous.estoque,
+            estoqueMinimo = estoqueMinimo ?: previous.estoqueMinimo,
+            observacoes = observacoes ?: previous.observacoes,
+
+            dosagemValor = dosagemValor
+                ?: if (dosagemConfere) previous.dosagemValor else null,
+
+            unidadeDosagem = unidadeDosagem
+                ?: if (dosagemConfere) previous.unidadeDosagem else null
+        )
+    }
+
+    // Resposta resumida da API.
     return copy(
         id = previous.id,
+
         dataInicio = previous.dataInicio,
         dataFim = previous.dataFim,
+
+        horarios = horarios.ifBlank { previous.horarios },
+        horarioDose = horarioDose ?: previous.horarioDose,
+
         frequencia = previous.frequencia,
-        quantidade = previous.quantidade,
-        unidadeQuantidade = previous.unidadeQuantidade,
-        dosagemValor = if (dosagemConfere) previous.dosagemValor else null,
-        unidadeDosagem = if (dosagemConfere) previous.unidadeDosagem else null
+        quantidade = quantidade ?: previous.quantidade,
+        unidadeQuantidade = unidadeQuantidade ?: previous.unidadeQuantidade,
+
+        estoque = estoque ?: previous.estoque,
+        estoqueMinimo = estoqueMinimo ?: previous.estoqueMinimo,
+        observacoes = observacoes ?: previous.observacoes,
+
+        ativo = previous.ativo,
+
+        dosagemValor = dosagemValor
+            ?: if (dosagemConfere) previous.dosagemValor else null,
+
+        unidadeDosagem = unidadeDosagem
+            ?: if (dosagemConfere) previous.unidadeDosagem else null
     )
 }

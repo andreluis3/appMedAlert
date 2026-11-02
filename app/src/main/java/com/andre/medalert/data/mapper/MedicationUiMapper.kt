@@ -6,11 +6,14 @@ import com.andre.medalert.data.model.Medication
 
 /**
  * Banco local -> model usado pela UI.
- * Campos que a API não devolve (quantidade, frequência) ficam vazios
+ * Campos que o aparelho ainda não conhece (quantidade, frequência) ficam vazios
  * e a tela simplesmente não mostra.
  *
  * localId = id da linha no Room: é o que a tela devolve ao pedir editar/excluir.
  * O ID do backend (remoteId) NÃO sai do repository.
+ *
+ * Os horários vêm de [horariosLista] (doseDiaria do backend). Quando os alarmes forem
+ * implementados, a fonte dos horários deve ser trocada AQUI/nessa função, sem mexer nas telas.
  */
 fun MedicationEntity.toMedication(): Medication {
     val horarios = horariosLista()
@@ -30,7 +33,8 @@ fun MedicationEntity.toMedication(): Medication {
         frequency = if (horarios.isNotEmpty()) "${horarios.size}x ao dia" else "",
         startDate = dataInicio,
         endDate = dataFim,
-        active = true,
+        notes = observacoes,
+        active = ativo,
         localId = id
     )
 }

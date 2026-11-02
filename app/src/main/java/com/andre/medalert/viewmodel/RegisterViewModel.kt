@@ -9,6 +9,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.remote.RetrofitClient
+import com.andre.medalert.data.remote.dto.CreateCuidadorRequest
 import com.andre.medalert.data.remote.dto.CreateUserRequest
 import com.andre.medalert.data.remote.dto.UserData
 import com.andre.medalert.data.repository.UserRepository
@@ -20,10 +21,13 @@ import kotlinx.coroutines.launch
 import retrofit2.HttpException
 import java.io.IOException
 
+/** Tipo de conta escolhido na tela de cadastro. */
+enum class RegisterAccountType { PACIENTE, CUIDADOR }
+
 sealed interface RegisterUiState {
     data object Idle : RegisterUiState
     data object Loading : RegisterUiState
-    data class Success(val userId: Int) : RegisterUiState
+    data class Success(val userId: Int, val tipo: RegisterAccountType) : RegisterUiState
     data class Error(val message: String) : RegisterUiState
 }
 
@@ -34,11 +38,25 @@ class RegisterViewModel(
     private val _uiState = MutableStateFlow<RegisterUiState>(RegisterUiState.Idle)
     val uiState: StateFlow<RegisterUiState> = _uiState.asStateFlow()
 
-    fun register(nome: String, email: String, senha: String, confirmarSenha: String) {
+    /**
+     * [telefone] e [parentesco] só são usados quando [tipo] é CUIDADOR (a API de paciente não
+     * tem esses campos). O usuarioId do cuidador nunca é enviado: o vínculo vem depois,
+     * pelo convite do paciente e pelo aceite.
+     */
+    fun register(
+        tipo: RegisterAccountType,
+        nome: String,
+        email: String,
+        senha: String,
+        confirmarSenha: String,
+        telefone: String = "",
+        parentesco: String? = null
+    ) {
         if (_uiState.value is RegisterUiState.Loading) return
 
         val nomeLimpo = nome.trim()
         val emailLimpo = email.trim()
+        val telefoneLimpo = telefone.filter { it.isDigit() }
 
         if (nomeLimpo.isBlank() || emailLimpo.isBlank() || senha.isBlank()) {
             _uiState.value = RegisterUiState.Error("Preencha nome, e-mail e senha.")
@@ -55,6 +73,14 @@ class RegisterViewModel(
             return
         }
 
+        if (tipo == RegisterAccountType.CUIDADOR &&
+            telefoneLimpo.isNotEmpty() &&
+            telefoneLimpo.length !in 10..11
+        ) {
+            _uiState.value = RegisterUiState.Error("Digite um telefone com DDD (10 ou 11 dígitos) ou deixe em branco.")
+            return
+        }
+
         // Regras de senha (tamanho mínimo etc.) ficam por conta do backend por enquanto:
         // se ele recusar, o erro volta como HttpException e vira mensagem amigável abaixo.
 
@@ -62,16 +88,29 @@ class RegisterViewModel(
 
         viewModelScope.launch {
             try {
-                val response = userRepository.createUser(
-                    CreateUserRequest(
-                        data = UserData(
-                            email = emailLimpo,
-                            nome = nomeLimpo,
-                            senha = senha
+                val response = when (tipo) {
+                    RegisterAccountType.PACIENTE -> userRepository.createUser(
+                        CreateUserRequest(
+                            data = UserData(
+                                email = emailLimpo,
+                                nome = nomeLimpo,
+                                senha = senha
+                            )
                         )
                     )
-                )
-                _uiState.value = RegisterUiState.Success(response.userId)
+
+                    RegisterAccountType.CUIDADOR -> userRepository.createCuidador(
+                        CreateCuidadorRequest(
+                            nome = nomeLimpo,
+                            email = emailLimpo,
+                            senha = senha,
+                            // usuarioId fica null (omitido): o vínculo é feito depois.
+                            telefone = telefoneLimpo.ifEmpty { null },
+                            parentesco = parentesco?.takeIf { it.isNotBlank() }
+                        )
+                    )
+                }
+                _uiState.value = RegisterUiState.Success(response.userId, tipo)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -87,6 +126,7 @@ class RegisterViewModel(
 
     private fun Throwable.toFriendlyMessage(): String = when (this) {
         is HttpException -> when (code()) {
+            409 -> "Este e-mail já está cadastrado. Entre na sua conta ou use outro e-mail."
             in 400..499 -> "Não foi possível criar a conta. Verifique os dados ou tente outro e-mail."
             in 500..599 -> "Não foi possível criar a conta agora. Se o problema continuar, tente outro e-mail ou tente novamente mais tarde."
             else -> "Não foi possível criar a conta (erro ${code()})."

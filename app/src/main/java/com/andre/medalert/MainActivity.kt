@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -15,6 +16,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
@@ -25,6 +27,7 @@ import androidx.navigation.navArgument
 import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.mapper.toMedication
 import com.andre.medalert.data.mock.mockDashboardResponse
+import com.andre.medalert.data.remote.SessionManager
 import com.andre.medalert.notification.NotificationHelper
 import com.andre.medalert.state.AdherenceUiState
 import com.andre.medalert.ui.screens.adherence.AdherenceScreen
@@ -36,6 +39,7 @@ import com.andre.medalert.ui.screens.home.HomeScreen
 import com.andre.medalert.ui.screens.login.LoginScreen
 import com.andre.medalert.ui.screens.medications.MedicationsScreen
 import com.andre.medalert.ui.screens.meds.CadastroMedScreen
+import com.andre.medalert.ui.screens.meds.EditarMedicamentoScreen
 import com.andre.medalert.ui.screens.notifications.NotificationScreen
 import com.andre.medalert.ui.screens.onboarding.OnboardingScreen
 import com.andre.medalert.ui.screens.profile.ChangePasswordScreen
@@ -90,6 +94,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 val coroutineScope = rememberCoroutineScope()
+                val context = LocalContext.current
 
                 // Controle do destino após a Splash.
                 var sessionLoaded by remember { mutableStateOf(false) }
@@ -124,6 +129,29 @@ class MainActivity : ComponentActivity() {
                             popUpTo("splash") {
                                 inclusive = true
                             }
+                        }
+                    }
+                }
+
+                // Sessão expirada: o interceptor do Retrofit recebeu 401 numa rota protegida e já
+                // limpou o DataStore. Aqui só voltamos ao login (com o onboarding atrás,
+                // para o botão Voltar do login não fechar o app).
+                LaunchedEffect(Unit) {
+                    val rotasPublicas = setOf("splash", "onboarding", "login", "cadastro")
+                    SessionManager.sessionExpired.collect {
+                        val rotaAtual = navController.currentDestination?.route
+                        if (rotaAtual != null && rotaAtual !in rotasPublicas) {
+                            Toast.makeText(
+                                context,
+                                "Sessão expirada. Entre novamente.",
+                                Toast.LENGTH_LONG
+                            ).show()
+                            navController.navigate("onboarding") {
+                                popUpTo(0) {
+                                    inclusive = true
+                                }
+                            }
+                            navController.navigate("login")
                         }
                     }
                 }
@@ -295,8 +323,12 @@ class MainActivity : ComponentActivity() {
                             onAddClick = {
                                 navController.navigate("cadastro_med")
                             },
-                            onEditClick = {
-                                // Implementar edição posteriormente.
+                            // O argumento da rota é o ID LOCAL do Room (o remoteId fica no Repository).
+                            onEditClick = { medication ->
+                                navController.navigate("editar_medication/${medication.localId}")
+                            },
+                            onDeleteConfirm = { medication ->
+                                medicationViewModel.deleteMedication(medication.localId)
                             }
                         )
                     }
@@ -311,6 +343,30 @@ class MainActivity : ComponentActivity() {
                                     }
                                     launchSingleTop = true
                                 }
+                            },
+                            onBackClick = {
+                                navController.popBackStack()
+                            }
+                        )
+                    }
+
+                    // Edição de medicamento (medId = ID local do Room).
+                    composable(
+                        route = "editar_medication/{medId}",
+                        arguments = listOf(
+                            navArgument("medId") {
+                                type = NavType.LongType
+                            }
+                        )
+                    ) { backStackEntry ->
+                        val medId =
+                            backStackEntry.arguments?.getLong("medId") ?: 0L
+
+                        EditarMedicamentoScreen(
+                            localId = medId,
+                            // A lista observa o Room, então ao voltar já mostra os dados novos.
+                            onSuccess = {
+                                navController.popBackStack()
                             },
                             onBackClick = {
                                 navController.popBackStack()

@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
 
 class MedicationViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -55,11 +56,27 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
                     // Um refresh bem-sucedido apaga o aviso de erro anterior.
                     _error.value = null
                 }
-                .onFailure {
+                .onFailure { e ->
                     // Offline ou erro do servidor: continua mostrando o que está no Room.
-                    _error.value = "Não foi possível atualizar. Mostrando dados salvos no celular."
+                    // (Um 401 também derruba a sessão no interceptor e leva ao login.)
+                    _error.value = when {
+                        e is HttpException && e.code() == 401 -> "Sessão expirada. Entre novamente."
+                        else -> "Não foi possível atualizar. Mostrando dados salvos no celular."
+                    }
                 }
             _isRefreshing.value = false
+        }
+    }
+
+    /**
+     * Exclui pelo ID LOCAL. A API confirma primeiro; só então o Room remove e a lista atualiza
+     * sozinha. Em caso de erro, o medicamento continua na lista e a mensagem aparece em [error].
+     */
+    fun deleteMedication(localId: Long) {
+        viewModelScope.launch {
+            repository.deleteMedication(localId)
+                .onSuccess { _error.value = null }
+                .onFailure { _error.value = it.message ?: "Não foi possível excluir o medicamento." }
         }
     }
 

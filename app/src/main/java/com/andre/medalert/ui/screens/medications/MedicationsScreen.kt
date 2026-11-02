@@ -40,7 +40,9 @@ fun MedicationsScreen(
     errorMessage: String? = null,
     onNavigate: (String) -> Unit = {},
     onAddClick: () -> Unit = {},
-    onEditClick: (Medication) -> Unit = {}
+    onEditClick: (Medication) -> Unit = {},
+    // Chamado depois que o usuário confirma o diálogo de exclusão.
+    onDeleteConfirm: (Medication) -> Unit = {}
 ) {
     var medicationToDelete by remember { mutableStateOf<Medication?>(null) }
 
@@ -118,8 +120,8 @@ fun MedicationsScreen(
             medicationName = medication.name,
             onCancel = { medicationToDelete = null },
             onConfirm = {
-                // Simulação apenas visual. Quando tivermos Repository,
-                // aqui entrará a chamada real de exclusão.
+                // A exclusão real (API + Room) é feita por quem recebe o callback.
+                onDeleteConfirm(medication)
                 medicationToDelete = null
             }
         )

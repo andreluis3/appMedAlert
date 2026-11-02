@@ -7,6 +7,7 @@ import com.andre.medalert.data.remote.ApiService
 import com.andre.medalert.data.remote.RetrofitClient
 import com.andre.medalert.data.remote.dto.ChangePasswordRequest
 import com.andre.medalert.data.remote.dto.ChangePasswordResponse
+import com.andre.medalert.data.remote.dto.CreateCuidadorRequest
 import com.andre.medalert.data.remote.dto.CreateUserRequest
 import com.andre.medalert.data.remote.dto.CreateUserResponse
 import com.andre.medalert.data.remote.dto.LoginRequest
@@ -41,7 +42,7 @@ class UserRepository(
     val pacienteId: Flow<Int?> = userPreferences.pacienteId
 
     /**
-     * Cria a conta (POST /api/users, body FLAT). A API devolve só o ID (ex.: 4).
+     * Cria a conta de PACIENTE (POST /api/users, body FLAT). A API devolve só o ID (ex.: 4).
      * NÃO salva sessão: depois do cadastro o app vai para a tela de Login.
      * 409 (e-mail já existe) e 500 saem como HttpException para o ViewModel traduzir.
      */
@@ -52,6 +53,23 @@ class UserRepository(
         val id = extractId(raw)
         if (id == null || id <= 0) {
             throw IllegalStateException("Cadastro sem userId válido. Resposta: $raw")
+        }
+        return CreateUserResponse(userId = id)
+    }
+
+    /**
+     * Cria a conta de CUIDADOR (POST /api/users/cuidador). A API devolve o ID do cuidador.
+     * NÃO salva sessão e NÃO cria vínculo: o vínculo com o paciente acontece depois,
+     * pelo convite (/users/requestCuidador) e aceite (/users/accept).
+     * Erros HTTP (ex.: e-mail duplicado) saem como HttpException para o ViewModel traduzir.
+     */
+    suspend fun createCuidador(request: CreateCuidadorRequest): CreateUserResponse {
+        val raw = withContext(Dispatchers.IO) { api.createCuidador(request).use { it.string() } }
+        Log.d("USER_REPO", "createCuidador corpo=$raw")
+
+        val id = extractId(raw)
+        if (id == null || id <= 0) {
+            throw IllegalStateException("Cadastro de cuidador sem id válido. Resposta: $raw")
         }
         return CreateUserResponse(userId = id)
     }
