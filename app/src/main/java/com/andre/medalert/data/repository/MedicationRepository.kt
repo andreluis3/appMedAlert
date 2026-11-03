@@ -1,7 +1,6 @@
 package com.andre.medalert.data.repository
 
 import android.util.Log
-import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.local.dao.MedicationDao
 import com.andre.medalert.data.local.entity.MedicationEntity
 import com.andre.medalert.data.mapper.HorarioDose
@@ -13,6 +12,7 @@ import com.andre.medalert.data.remote.ApiService
 import com.andre.medalert.data.remote.RetrofitClient
 import com.andre.medalert.data.remote.dto.EditMedicamentoRequest
 import com.andre.medalert.data.remote.dto.MedicamentoData
+import com.andre.medalert.data.local.UserPreferencesRepository
 import com.google.gson.Gson
 import com.google.gson.JsonParser
 import kotlinx.coroutines.CancellationException

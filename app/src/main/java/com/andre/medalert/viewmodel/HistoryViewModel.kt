@@ -4,9 +4,9 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.andre.medalert.data.local.AppDatabase
+import com.andre.medalert.data.repository.HistoryRepository
 import com.andre.medalert.data.mapper.toHistoryUiModel
 import com.andre.medalert.data.model.HistoryUiModel
-import com.andre.medalert.data.repository.HistoryRepository
 import com.andre.medalert.data.schedule.SessionUser
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow

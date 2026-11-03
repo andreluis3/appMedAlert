@@ -1,12 +1,12 @@
 package com.andre.medalert.data.remote
 
 import android.content.Context
-import com.andre.medalert.data.local.UserPreferencesRepository
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import com.andre.medalert.data.local.UserPreferencesRepository
 
 /**
  * Ponte entre o OkHttp (que não tem Context) e o DataStore da sessão.

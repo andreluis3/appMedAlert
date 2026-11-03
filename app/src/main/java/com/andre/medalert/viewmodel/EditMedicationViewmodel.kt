@@ -7,8 +7,8 @@ import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.AP
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.andre.medalert.data.local.AppDatabase
 import com.andre.medalert.data.local.UserPreferencesRepository
+import com.andre.medalert.data.local.AppDatabase
 import com.andre.medalert.data.local.entity.MedicationEntity
 import com.andre.medalert.data.mapper.toIsoUtc
 import com.andre.medalert.data.repository.MedicationRepository

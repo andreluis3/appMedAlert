@@ -1,7 +1,6 @@
 package com.andre.medalert.data.repository
 
 import android.util.Log
-import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.model.User
 import com.andre.medalert.data.remote.ApiService
 import com.andre.medalert.data.remote.RetrofitClient
@@ -12,6 +11,7 @@ import com.andre.medalert.data.remote.dto.CreateUserRequest
 import com.andre.medalert.data.remote.dto.CreateUserResponse
 import com.andre.medalert.data.remote.dto.LoginRequest
 import com.andre.medalert.data.remote.dto.LoginResponse
+import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.remote.dto.toDomain
 import com.google.gson.Gson
 import com.google.gson.JsonObject

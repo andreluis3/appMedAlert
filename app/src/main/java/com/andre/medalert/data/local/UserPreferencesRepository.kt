@@ -24,6 +24,7 @@ class UserPreferencesRepository(context: Context) {
         val TOKEN = stringPreferencesKey("token")
         val USER_TYPE = stringPreferencesKey("user_type")
         val PACIENTE_ID = intPreferencesKey("paciente_id")
+        val USER_NAME = stringPreferencesKey("user_name")
     }
 
     /** ID real devolvido pelo login. null = nenhum usuário logado. */
@@ -38,19 +39,25 @@ class UserPreferencesRepository(context: Context) {
     /** Só para cuidador: ID do paciente acompanhado. */
     val pacienteId: Flow<Int?> = dataStore.data.map { it[Keys.PACIENTE_ID] }
 
+    /** Nome do usuário, quando o login o devolve. null = desconhecido (nunca inventado). */
+    val userName: Flow<String?> =
+        dataStore.data.map { it[Keys.USER_NAME]?.takeIf { nome -> nome.isNotBlank() } }
+
     val isLoggedIn: Flow<Boolean> = userId.map { it != null }
 
     suspend fun saveSession(
         userId: Int,
         token: String?,
         tipo: String? = null,
-        pacienteId: Int? = null
+        pacienteId: Int? = null,
+        nome: String? = null
     ) {
         dataStore.edit { prefs ->
             prefs[Keys.USER_ID] = userId
             if (token != null) prefs[Keys.TOKEN] = token else prefs.remove(Keys.TOKEN)
             if (tipo != null) prefs[Keys.USER_TYPE] = tipo else prefs.remove(Keys.USER_TYPE)
             if (pacienteId != null) prefs[Keys.PACIENTE_ID] = pacienteId else prefs.remove(Keys.PACIENTE_ID)
+            if (nome != null) prefs[Keys.USER_NAME] = nome else prefs.remove(Keys.USER_NAME)
         }
     }
 

@@ -2,8 +2,8 @@ package com.andre.medalert.data.schedule
 
 import android.content.Context
 import com.andre.medalert.data.local.AppDatabase
-import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.local.entity.MedicationEntity
+import com.andre.medalert.data.local.UserPreferencesRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine

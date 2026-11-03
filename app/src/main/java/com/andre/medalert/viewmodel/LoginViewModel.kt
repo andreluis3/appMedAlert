@@ -3,10 +3,10 @@ package com.andre.medalert.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.model.User
 import com.andre.medalert.data.repository.InvalidCredentialsException
 import com.andre.medalert.data.repository.UserRepository
+import com.andre.medalert.data.local.UserPreferencesRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

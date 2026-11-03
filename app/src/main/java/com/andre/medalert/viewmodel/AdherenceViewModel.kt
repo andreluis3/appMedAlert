@@ -4,8 +4,8 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.andre.medalert.data.local.AppDatabase
-import com.andre.medalert.data.repository.HistoryRepository
 import com.andre.medalert.data.schedule.SessionUser
+import com.andre.medalert.data.repository.HistoryRepository
 import com.andre.medalert.state.AdherenceUiState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow

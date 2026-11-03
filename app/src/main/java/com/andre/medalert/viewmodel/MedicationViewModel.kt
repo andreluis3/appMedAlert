@@ -4,9 +4,9 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.andre.medalert.data.local.AppDatabase
-import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.local.entity.MedicationEntity
 import com.andre.medalert.data.repository.MedicationRepository
+import com.andre.medalert.data.local.UserPreferencesRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted

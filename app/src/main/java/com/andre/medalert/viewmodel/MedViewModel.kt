@@ -5,10 +5,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
 import androidx.lifecycle.viewModelScope
+import com.andre.medalert.data.local.UserPreferencesRepository
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.andre.medalert.data.local.AppDatabase
-import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.remote.dto.MedicamentoData
 import com.andre.medalert.data.repository.MedicationRepository
 import com.andre.medalert.data.repository.SaveOutcome

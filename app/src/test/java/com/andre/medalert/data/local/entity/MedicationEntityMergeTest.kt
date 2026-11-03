@@ -16,7 +16,7 @@ class MedicationEntityMergeTest {
         horarios = "08:00,16:00",
         dataInicio = "2026-10-30 08:00:00-03:00",
         dataFim = "2026-11-30 08:00:00-03:00",
-        dosagemValor = 50,
+        dosagemValor = 50.0,
         frequencia = 8,
         quantidade = 1,
         unidadeDosagem = "mg",
@@ -42,7 +42,7 @@ class MedicationEntityMergeTest {
     ) = MedicationEntity(
         userId = 3, nome = "Losartana", dosagem = "50 mg", horarios = "05:00,13:00,21:00",
         dataInicio = dataInicio, dataFim = "2026-11-30T00:00:00.000Z",
-        dosagemValor = 50, frequencia = 8, quantidade = 1,
+        dosagemValor = 50.0, frequencia = 8, quantidade = 1,
         unidadeDosagem = "mg", unidadeQuantidade = "comprimido",
         estoque = estoque, estoqueMinimo = 5, observacoes = null, ativo = true,
         isSynced = true, remoteId = 3
@@ -64,7 +64,7 @@ class MedicationEntityMergeTest {
         assertEquals("2026-10-30 08:00:00-03:00", r.dataInicio)
         assertEquals(20, r.estoque)
         assertEquals("após o café", r.observacoes)
-        assertEquals(50, r.dosagemValor)
+        assertEquals(50.0, r.dosagemValor!!, 0.0)
         assertEquals("mg", r.unidadeDosagem)
     }
 
@@ -91,9 +91,10 @@ class MedicationEntityMergeTest {
     }
 
     @Test
-    fun respostaCompleta_eFonteDaVerdade_inclusiveParaNulos() {
+    fun respostaCompleta_comValoresNulos_mantemOQueOAparelhoJaTinha() {
+        // Comportamento ATUAL de preservingDetailsFrom: "estoque ?: previous.estoque".
         val r = completa(estoque = null).preservingDetailsFrom(local)
-        assertNull(r.estoque)          // apagado em outro aparelho: não ressuscita o valor antigo
-        assertNull(r.observacoes)
+        assertEquals(20, r.estoque)
+        assertEquals("após o café", r.observacoes)
     }
 }

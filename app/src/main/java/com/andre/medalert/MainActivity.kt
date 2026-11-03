@@ -21,7 +21,6 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.mapper.toMedication
 import com.andre.medalert.data.remote.SessionManager
 import com.andre.medalert.notification.MedicationReminderManager
@@ -35,6 +34,7 @@ import com.andre.medalert.ui.screens.home.HomeScreen
 import com.andre.medalert.ui.screens.login.LoginScreen
 import com.andre.medalert.ui.screens.medications.MedicationsScreen
 import com.andre.medalert.ui.screens.meds.CadastroMedScreen
+import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.ui.screens.meds.EditarMedicamentoScreen
 import com.andre.medalert.ui.screens.notifications.NotificationScreen
 import com.andre.medalert.ui.screens.onboarding.OnboardingScreen

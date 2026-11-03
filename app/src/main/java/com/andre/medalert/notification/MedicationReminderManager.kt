@@ -2,9 +2,9 @@ package com.andre.medalert.notification
 
 import android.content.Context
 import com.andre.medalert.data.local.AppDatabase
-import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.local.entity.MedicationEntity
 import com.andre.medalert.data.schedule.DoseScheduleCalculator
+import com.andre.medalert.data.local.UserPreferencesRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex

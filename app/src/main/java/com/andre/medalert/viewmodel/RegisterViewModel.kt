@@ -7,9 +7,9 @@ import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.AP
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.remote.RetrofitClient
 import com.andre.medalert.data.remote.dto.CreateCuidadorRequest
+import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.remote.dto.CreateUserRequest
 import com.andre.medalert.data.remote.dto.UserData
 import com.andre.medalert.data.repository.UserRepository

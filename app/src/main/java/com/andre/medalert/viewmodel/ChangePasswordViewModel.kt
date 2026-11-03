@@ -6,8 +6,8 @@ import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.AP
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.remote.dto.ChangePasswordRequest
-import com.andre.medalert.data.local.UserPreferencesRepository // Ajustado conforme seu UserRepository
 import com.andre.medalert.data.repository.UserRepository
 import com.andre.medalert.state.ChangePasswordUiState
 import com.andre.medalert.data.remote.RetrofitClient

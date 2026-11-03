@@ -43,7 +43,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.andre.medalert.data.mock.mockDashboardResponse
 import com.andre.medalert.data.remote.dto.AdesaoDiaDto
 import com.andre.medalert.data.remote.dto.AdesaoRemedioDto
 import com.andre.medalert.data.remote.dto.DashboardResponse
