@@ -3,7 +3,7 @@ package com.andre.medalert.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.andre.medalert.data.model.NotificationUiModel
-import com.andre.medalert.data.repository.MockNotificationRepository
+import com.andre.medalert.data.repository.LocalNotificationRepository
 import com.andre.medalert.data.repository.NotificationRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,7 +17,7 @@ sealed interface NotificationUiState {
 }
 
 class NotificationViewModel @JvmOverloads constructor(
-    private val repository: NotificationRepository = MockNotificationRepository
+    private val repository: NotificationRepository = LocalNotificationRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<NotificationUiState>(NotificationUiState.Loading)

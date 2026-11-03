@@ -30,7 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.andre.medalert.data.repository.MockResponsavelRepository
+import com.andre.medalert.data.repository.ResponsavelRepositoryPendente
 import com.andre.medalert.data.repository.ResponsavelRepository
 import com.andre.medalert.ui.components.FriendlyErrorDialog
 import com.andre.medalert.ui.screens.login.FieldLabel
@@ -51,7 +51,7 @@ private val emailRegex = Regex("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")
  */
 @Composable
 fun AddResponsibleScreen(
-    repository: ResponsavelRepository = MockResponsavelRepository,
+    repository: ResponsavelRepository = ResponsavelRepositoryPendente,
     onBackClick: () -> Unit = {},
     onSaved: () -> Unit = {}
 ) {

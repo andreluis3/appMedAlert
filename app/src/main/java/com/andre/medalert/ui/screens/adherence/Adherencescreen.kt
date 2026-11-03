@@ -69,7 +69,7 @@ import com.andre.medalert.ui.theme.MedAlertTextSecondary
  */
 @Composable
 fun AdherenceScreen(
-    uiState: AdherenceUiState = AdherenceUiState.Success(mockDashboardResponse),
+    uiState: AdherenceUiState = AdherenceUiState.Loading,
     onBackClick: () -> Unit = {},
     onRetryClick: () -> Unit = {}
 ) {

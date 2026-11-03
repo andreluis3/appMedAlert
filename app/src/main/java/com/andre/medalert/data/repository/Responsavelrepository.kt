@@ -1,17 +1,17 @@
 package com.andre.medalert.data.repository
 
-import androidx.compose.runtime.mutableStateListOf
-import com.andre.medalert.data.mock.mockResponsaveisIniciais
 import com.andre.medalert.data.model.ResponsavelUiModel
-import java.util.UUID
+
+/** Falta endpoint/contrato no backend para a operação pedida. */
+class BackendDependencyException(message: String) : Exception(message)
 
 /**
- * Abstração dos dados de Responsáveis. Métodos suspend para já ficar
- * compatível com uma futura implementação via API.
+ * Abstração dos dados de Responsáveis.
  *
- * Hoje só existe POST /api/users/cuid (usado por `adicionar`). Não há
- * GET nem DELETE de responsáveis na documentação, então `listar` e
- * `remover` continuam mock até o backend definir esses endpoints.
+ * DEPENDÊNCIA DO BACKEND: não existe endpoint de listagem nem de remoção de responsáveis.
+ * Existem apenas POST /api/users/cuidador (createCuidador) e POST /api/users/requestCuidador
+ * (requestCuidador, convite do paciente). Quando o contrato de listagem existir, criar
+ * ResponsavelRepositoryApi e trocar só o valor padrão nas telas.
  */
 interface ResponsavelRepository {
     suspend fun listar(): List<ResponsavelUiModel>
@@ -19,33 +19,16 @@ interface ResponsavelRepository {
     suspend fun remover(id: String)
 }
 
-/**
- * Implementação em memória. Quando o backend tiver os endpoints
- * completos, criar uma ResponsavelRepositoryApi (usando
- * ApiService.createCuidador para `adicionar`) e trocar apenas o valor
- * default usado pelas telas — nenhuma tela precisa mudar.
- */
-object MockResponsavelRepository : ResponsavelRepository {
+/** Sem dados inventados: lista vazia, e as operações sem endpoint avisam a dependência. */
+object ResponsavelRepositoryPendente : ResponsavelRepository {
 
-    private val responsaveis = mutableStateListOf<ResponsavelUiModel>().apply {
-        addAll(mockResponsaveisIniciais)
-    }
+    override suspend fun listar(): List<ResponsavelUiModel> = emptyList()
 
-    override suspend fun listar(): List<ResponsavelUiModel> = responsaveis.toList()
-
-    override suspend fun adicionar(nome: String, email: String): ResponsavelUiModel {
-        val novo = ResponsavelUiModel(
-            id = UUID.randomUUID().toString(),
-            nome = nome,
-            email = email,
-            relacao = "Não informado", // TODO: Campo aguardando definição do contrato da API
-            status = "Ativo"           // TODO: Campo aguardando definição do contrato da API
-        )
-        responsaveis.add(novo)
-        return novo
-    }
+    // TODO: ligar a ApiService.requestCuidador(...) quando eu tiver os DTOs RequestCuidadorRequest/CreateCuidadorRequest.
+    override suspend fun adicionar(nome: String, email: String): ResponsavelUiModel =
+        throw BackendDependencyException("Convite de responsável ainda não está ligado ao backend.")
 
     override suspend fun remover(id: String) {
-        responsaveis.removeAll { it.id == id }
+        throw BackendDependencyException("Não existe endpoint para remover responsáveis.")
     }
 }

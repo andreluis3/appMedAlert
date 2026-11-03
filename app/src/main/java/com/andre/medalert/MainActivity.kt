@@ -1,23 +1,20 @@
 package com.andre.medalert
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -26,10 +23,9 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.mapper.toMedication
-import com.andre.medalert.data.mock.mockDashboardResponse
 import com.andre.medalert.data.remote.SessionManager
+import com.andre.medalert.notification.MedicationReminderManager
 import com.andre.medalert.notification.NotificationHelper
-import com.andre.medalert.state.AdherenceUiState
 import com.andre.medalert.ui.screens.adherence.AdherenceScreen
 import com.andre.medalert.ui.screens.cadastro.CadastroScreen
 import com.andre.medalert.ui.screens.calendar.CalendarScreen
@@ -42,7 +38,6 @@ import com.andre.medalert.ui.screens.meds.CadastroMedScreen
 import com.andre.medalert.ui.screens.meds.EditarMedicamentoScreen
 import com.andre.medalert.ui.screens.notifications.NotificationScreen
 import com.andre.medalert.ui.screens.onboarding.OnboardingScreen
-import com.andre.medalert.ui.screens.profile.ChangePasswordScreen
 import com.andre.medalert.ui.screens.profile.ProfileScreen
 import com.andre.medalert.ui.screens.responsibles.AddResponsibleScreen
 import com.andre.medalert.ui.screens.responsibles.CaregiverRequestScreen
@@ -50,19 +45,15 @@ import com.andre.medalert.ui.screens.responsibles.ResponsiblesScreen
 import com.andre.medalert.ui.screens.settings.SettingsScreen
 import com.andre.medalert.ui.screens.splash.SplashScreen
 import com.andre.medalert.ui.theme.MedAlertTheme
+import com.andre.medalert.viewmodel.AdherenceViewModel
 import com.andre.medalert.viewmodel.MedicationViewModel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
-    private val notificationPermissionLauncher =
-        registerForActivityResult(
-            ActivityResultContracts.RequestPermission()
-        ) {
-            // Resultado da permissão de notificações.
-        }
+    // Muda a cada retorno ao app (ex.: vindo das Configurações) para a Home reavaliar as permissões.
+    private var resumeTick by mutableIntStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -70,18 +61,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         NotificationHelper.createNotificationChannel(this)
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (
-                ContextCompat.checkSelfPermission(
-                    this,
-                    Manifest.permission.POST_NOTIFICATIONS
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                notificationPermissionLauncher.launch(
-                    Manifest.permission.POST_NOTIFICATIONS
-                )
-            }
-        }
+        // A permissão de notificações NÃO é pedida aqui: a Home explica o motivo e pede (ReminderPermissionCard).
 
         setContent {
             MedAlertTheme {
@@ -136,6 +116,7 @@ class MainActivity : ComponentActivity() {
                 // Sessão expirada: o interceptor do Retrofit recebeu 401 numa rota protegida e já
                 // limpou o DataStore. Aqui só voltamos ao login (com o onboarding atrás,
                 // para o botão Voltar do login não fechar o app).
+                // Os alarmes são cancelados sozinhos pelo observador da Application.
                 LaunchedEffect(Unit) {
                     val rotasPublicas = setOf("splash", "onboarding", "login", "cadastro")
                     SessionManager.sessionExpired.collect {
@@ -157,6 +138,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 // Logout: limpa a sessão e retorna ao onboarding.
+                // Os alarmes do usuário saem sozinhos (o observador vê a sessão vazia).
                 val logout: () -> Unit = {
                     coroutineScope.launch {
                         userPreferences.clear()
@@ -252,6 +234,7 @@ class MainActivity : ComponentActivity() {
                     // Home.
                     composable("home") {
                         HomeScreen(
+                            permissionRefreshKey = resumeTick,
                             onNavigate = navigateToTab,
                             onBellClick = {
                                 navController.navigate("notifications")
@@ -378,39 +361,27 @@ class MainActivity : ComponentActivity() {
                     composable("calendar") {
                         CalendarScreen(
                             onNavigate = navigateToTab,
-                            onDayClick = { dayUi ->
-                                dayUi.day?.let { day ->
-                                    navController.navigate(
-                                        "dayDetails/$day/${dayUi.isToday}"
-                                    )
-                                }
+                            onDayClick = { year, month, day ->
+                                navController.navigate("dayDetails/$year/$month/$day")
                             }
                         )
                     }
 
                     // Detalhes do dia.
                     composable(
-                        route = "dayDetails/{day}/{isToday}",
+                        route = "dayDetails/{year}/{month}/{day}",
                         arguments = listOf(
-                            navArgument("day") {
-                                type = NavType.IntType
-                            },
-                            navArgument("isToday") {
-                                type = NavType.BoolType
-                            }
+                            navArgument("year") { type = NavType.IntType },
+                            navArgument("month") { type = NavType.IntType },
+                            navArgument("day") { type = NavType.IntType }
                         )
                     ) { backStackEntry ->
-
-                        val day =
-                            backStackEntry.arguments?.getInt("day") ?: 1
-
-                        val isToday =
-                            backStackEntry.arguments?.getBoolean("isToday")
-                                ?: false
+                        val args = backStackEntry.arguments
 
                         DayDetailsScreen(
-                            day = day,
-                            isToday = isToday,
+                            year = args?.getInt("year") ?: 1970,
+                            month = args?.getInt("month") ?: 1,
+                            day = args?.getInt("day") ?: 1,
                             onBackClick = {
                                 navController.popBackStack()
                             }
@@ -427,27 +398,10 @@ class MainActivity : ComponentActivity() {
                         )
                     }
 
-                    // Adesão ao tratamento.
+                    // Adesão ao tratamento (GET /api/historys/dashboard/{id}).
                     composable("adherence") {
-                        var uiState by remember {
-                            mutableStateOf<AdherenceUiState>(
-                                AdherenceUiState.Loading
-                            )
-                        }
-
-                        var reloadKey by remember {
-                            mutableStateOf(0)
-                        }
-
-                        LaunchedEffect(reloadKey) {
-                            uiState = AdherenceUiState.Loading
-
-                            delay(800)
-
-                            uiState = AdherenceUiState.Success(
-                                mockDashboardResponse
-                            )
-                        }
+                        val adherenceViewModel: AdherenceViewModel = viewModel()
+                        val uiState by adherenceViewModel.uiState.collectAsState()
 
                         AdherenceScreen(
                             uiState = uiState,
@@ -455,7 +409,7 @@ class MainActivity : ComponentActivity() {
                                 navController.popBackStack()
                             },
                             onRetryClick = {
-                                reloadKey++
+                                adherenceViewModel.load()
                             }
                         )
                     }
@@ -540,6 +494,15 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        resumeTick++
+        // Ao abrir o app: garante que os alarmes batem com o Room.
+        lifecycleScope.launch {
+            MedicationReminderManager.rescheduleAll(applicationContext)
         }
     }
 }

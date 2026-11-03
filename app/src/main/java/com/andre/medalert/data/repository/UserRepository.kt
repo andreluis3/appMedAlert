@@ -97,7 +97,8 @@ class UserRepository(
                     userId = user.id,
                     token = user.token,
                     tipo = user.tipo,
-                    pacienteId = user.pacienteId
+                    pacienteId = user.pacienteId,
+                    nome = user.nome.takeIf { it.isNotBlank() }
                 )
                 Result.success(user)
             }

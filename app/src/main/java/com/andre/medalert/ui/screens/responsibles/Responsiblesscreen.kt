@@ -43,7 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.andre.medalert.data.model.ResponsavelUiModel
-import com.andre.medalert.data.repository.MockResponsavelRepository
+import com.andre.medalert.data.repository.ResponsavelRepositoryPendente
 import com.andre.medalert.data.repository.ResponsavelRepository
 import com.andre.medalert.ui.components.EmptyState
 import com.andre.medalert.ui.components.ErrorState
@@ -74,7 +74,7 @@ private sealed interface ResponsiblesUiState {
 @Composable
 fun ResponsiblesScreen(
     reloadKey: Int = 0,
-    repository: ResponsavelRepository = MockResponsavelRepository,
+    repository: ResponsavelRepository = ResponsavelRepositoryPendente,
     onBackClick: () -> Unit = {},
     onAddClick: () -> Unit = {}
 ) {
