@@ -4,10 +4,15 @@ import com.andre.medalert.data.local.entity.DoseHistoryEntity
 import com.andre.medalert.data.model.HistoryDoseStatus
 import com.andre.medalert.data.model.HistoryUiModel
 import com.andre.medalert.data.remote.dto.HistoryRecordDto
+import java.time.LocalDate
 
-/** API -> banco local: um registro (medicamento + várias doses) vira várias linhas. */
-fun HistoryRecordDto.toEntities(userId: Int): List<DoseHistoryEntity> =
-    doses.map { dose ->
+/**
+ * API -> banco local: um registro (medicamento + várias doses) vira várias linhas.
+ * A API devolve as doses de HOJE, então o dia gravado é o dia atual.
+ */
+fun HistoryRecordDto.toEntities(userId: Int): List<DoseHistoryEntity> {
+    val hoje = LocalDate.now().toString()
+    return doses.map { dose ->
         DoseHistoryEntity(
             userId = userId,
             medicamentoNome = nome,
@@ -15,9 +20,11 @@ fun HistoryRecordDto.toEntities(userId: Int): List<DoseHistoryEntity> =
             horario = dose.horario,
             tomado = dose.tomado,
             status = dose.status,
-            isSynced = true
+            isSynced = true,
+            dia = hoje
         )
     }
+}
 
 /** API -> UI: achata medicamento + doses em uma lista de doses para a tela. */
 fun List<HistoryRecordDto>.toHistoryUiModels(): List<HistoryUiModel> =

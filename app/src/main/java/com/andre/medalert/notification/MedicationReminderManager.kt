@@ -68,6 +68,7 @@ object MedicationReminderManager {
 
         (store.ids() - scheduled).forEach { removedId ->
             AlarmScheduler.cancel(app, removedId)
+            SnoozeStore.cancel(app, removedId)
             NotificationHelper.cancelNotification(app, NotificationHelper.notificationIdFor(removedId))
         }
         store.save(scheduled)

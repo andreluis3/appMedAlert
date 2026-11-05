@@ -6,6 +6,11 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
 import android.media.AudioAttributes
 import android.net.Uri
 import android.os.Build
@@ -26,6 +31,14 @@ object NotificationHelper {
     const val EXTRA_NOTIFICATION_ID = "extra_notification_id"
     const val EXTRA_LOCAL_ID = "extra_local_id"
     const val EXTRA_SCHEDULED_AT = "extra_scheduled_at"
+
+    // Request codes dos botões. Os intents também diferem pela action, mas separar evita colisão.
+    private const val TAKE_REQUEST_BASE = 2_000_000
+    private const val SNOOZE_REQUEST_BASE = 3_000_000
+
+    // Cores do tema do MedAlert (MedAlertBackground e MedAlertPrimary).
+    private val COLOR_BACKGROUND = 0xFF0B0F10.toInt()
+    private val COLOR_ACCENT = 0xFF2DD4CF.toInt()
 
     /** Um ID por medicamento: uma dose nova substitui a anterior ainda não confirmada. */
     fun notificationIdFor(localId: Long): Int = NOTIFICATION_ID_BASE + (localId % 1_000_000L).toInt()
@@ -56,7 +69,10 @@ object NotificationHelper {
         }
     }
 
-    /** Notificação de dose real: "Está na hora de tomar Losartana — 50 mg". */
+    /**
+     * Notificação de dose real, com ações rápidas que funcionam com o app fechado:
+     * "Tomar agora" (registra no Room) e "Adiar 5 min" (só reagenda, sem histórico).
+     */
     @SuppressLint("MissingPermission")
     fun showMedicationNotification(
         context: Context,
@@ -70,6 +86,7 @@ object NotificationHelper {
         if (!manager.areNotificationsEnabled()) return
 
         val notificationId = notificationIdFor(localId)
+        val offset = notificationId - NOTIFICATION_ID_BASE
 
         val openAppIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -79,39 +96,48 @@ object NotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Ação "Registrar como tomado": só prepara a estrutura (ver DoseIntakeRegistrar).
-        val takenIntent = Intent(context, DismissAlarmReceiver::class.java).apply {
-            putExtra(EXTRA_NOTIFICATION_ID, notificationId)
-            putExtra(EXTRA_LOCAL_ID, localId)
-            putExtra(EXTRA_SCHEDULED_AT, scheduledAtMillis)
-        }
-        val takenPending = PendingIntent.getBroadcast(
-            context, notificationId, takenIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        val takePending = actionPending(
+            context, DismissAlarmReceiver.ACTION_TAKE, TAKE_REQUEST_BASE + offset,
+            notificationId, localId, scheduledAtMillis
+        )
+        val snoozePending = actionPending(
+            context, DismissAlarmReceiver.ACTION_SNOOZE, SNOOZE_REQUEST_BASE + offset,
+            notificationId, localId, scheduledAtMillis
         )
 
-        val text = if (dosage.isBlank()) {
-            "Está na hora de tomar $medicationName"
-        } else {
-            "Está na hora de tomar $medicationName — $dosage"
-        }
+        val timeLabel = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(scheduledAtMillis))
+        val doseLine = if (dosage.isBlank()) medicationName else "$medicationName — $dosage"
+        val title = "Hora do medicamento 💊"
 
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info) // TODO: trocar pelo ícone real do MedAlert
-            .setContentTitle("Hora do medicamento")
-            .setContentText(text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_medalert)
+            .setColor(COLOR_ACCENT)
+            .setContentTitle(title)
+            .setContentText(doseLine)
+            .setStyle(
+                NotificationCompat.BigTextStyle()
+                    .setBigContentTitle(title)
+                    .bigText("$doseLine\nEstá na hora de tomar seu medicamento.")
+                    .setSummaryText("Programado para $timeLabel")
+            )
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setWhen(scheduledAtMillis)
             .setShowWhen(true)
-            .setAutoCancel(true)
+            // Tocar no corpo abre o app, mas a notificação continua até tomar ou adiar.
+            .setAutoCancel(false)
             .setContentIntent(openAppPending)
-            .addAction(0, "Registrar como tomado", takenPending)
-            .build()
+            .addAction(0, "Tomar agora", takePending)
+            .addAction(0, "Adiar 5 min", snoozePending)
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            builder.setDefaults(NotificationCompat.DEFAULT_ALL)
+        }
+
+        buildLargeIcon(context)?.let { builder.setLargeIcon(it) }
 
         try {
-            manager.notify(notificationId, notification)
+            manager.notify(notificationId, builder.build())
         } catch (_: SecurityException) {
             // Permissão revogada no meio do caminho.
         }
@@ -124,22 +150,111 @@ object NotificationHelper {
         if (!manager.areNotificationsEnabled()) return
 
         val horarioAtual = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("Hora do medicamento")
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_medalert)
+            .setColor(COLOR_ACCENT)
+            .setContentTitle("Hora do medicamento 💊")
             .setContentText("Está na hora de tomar $medicationName • $horarioAtual")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setAutoCancel(true)
-            .build()
+
+        buildLargeIcon(context)?.let { builder.setLargeIcon(it) }
 
         try {
-            manager.notify(notificationId, notification)
+            manager.notify(notificationId, builder.build())
         } catch (_: SecurityException) {
         }
     }
 
     fun cancelNotification(context: Context, notificationId: Int) {
         NotificationManagerCompat.from(context).cancel(notificationId)
+    }
+
+    // ------------------------------------------------------------------ helpers
+
+    private fun actionPending(
+        context: Context,
+        action: String,
+        requestCode: Int,
+        notificationId: Int,
+        localId: Long,
+        scheduledAtMillis: Long
+    ): PendingIntent {
+        val intent = Intent(context, DismissAlarmReceiver::class.java).apply {
+            this.action = action
+            putExtra(EXTRA_NOTIFICATION_ID, notificationId)
+            putExtra(EXTRA_LOCAL_ID, localId)
+            putExtra(EXTRA_SCHEDULED_AT, scheduledAtMillis)
+        }
+        return PendingIntent.getBroadcast(
+            context, requestCode, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    /**
+     * Ícone grande: a logo Dosy (res/drawable/dosy_logo.png) sobre um quadrado arredondado
+     * escuro (cor de fundo do app) com um anel turquesa sutil.
+     */
+    private fun buildLargeIcon(context: Context): Bitmap? {
+        return try {
+            val density = context.resources.displayMetrics.density
+            val size = (64 * density).toInt().coerceAtLeast(96)
+
+            val logo = decodeSampled(context, R.drawable.dosy_logo, size) ?: return null
+
+            val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(output)
+            val s = size.toFloat()
+
+            val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = COLOR_BACKGROUND }
+            canvas.drawRoundRect(RectF(0f, 0f, s, s), s * 0.24f, s * 0.24f, backgroundPaint)
+
+            val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = s * 0.025f
+                color = COLOR_ACCENT
+                alpha = 110
+            }
+            val inset = s * 0.02f
+            canvas.drawRoundRect(
+                RectF(inset, inset, s - inset, s - inset),
+                s * 0.22f, s * 0.22f, ringPaint
+            )
+
+            // A logo é larga: cabe pela largura, centralizada.
+            val maxSide = s * 0.78f
+            val scale = minOf(maxSide / logo.width, maxSide / logo.height)
+            val w = logo.width * scale
+            val h = logo.height * scale
+            val left = (s - w) / 2f
+            val top = (s - h) / 2f
+            val logoPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+            canvas.drawBitmap(logo, null, RectF(left, top, left + w, top + h), logoPaint)
+
+            output
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /** Decodifica o PNG já reduzido, para não carregar a imagem inteira na memória. */
+    private fun decodeSampled(context: Context, resId: Int, targetPx: Int): Bitmap? {
+        val bounds = BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+            inScaled = false
+        }
+        BitmapFactory.decodeResource(context.resources, resId, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+        var sample = 1
+        while (bounds.outWidth / (sample * 2) >= targetPx) sample *= 2
+
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inScaled = false
+        }
+        return BitmapFactory.decodeResource(context.resources, resId, options)
     }
 }

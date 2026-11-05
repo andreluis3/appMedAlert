@@ -16,7 +16,7 @@ import com.andre.medalert.data.local.entity.MedicationEntity
         MedicationEntity::class,
         DoseHistoryEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -146,6 +146,27 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 5 -> 6:
+         * dose_history ganha os campos que identificam uma dose registrada pela notificação:
+         * medicationLocalId, previstoEm, tomadoEm e dia (todos anuláveis, sem perder nenhuma linha).
+         * O índice único (medicationLocalId, previstoEm) impede registro duplicado da mesma dose.
+         * Linhas antigas ficam com dia = NULL e não aparecem na consulta do dia atual.
+         */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `dose_history` ADD COLUMN `medicationLocalId` INTEGER")
+                db.execSQL("ALTER TABLE `dose_history` ADD COLUMN `previstoEm` INTEGER")
+                db.execSQL("ALTER TABLE `dose_history` ADD COLUMN `tomadoEm` INTEGER")
+                db.execSQL("ALTER TABLE `dose_history` ADD COLUMN `dia` TEXT")
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS " +
+                            "`index_dose_history_medicationLocalId_previstoEm` " +
+                            "ON `dose_history` (`medicationLocalId`, `previstoEm`)"
+                )
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -156,7 +177,8 @@ abstract class AppDatabase : RoomDatabase() {
                     .addMigrations(
                         MIGRATION_2_3,
                         MIGRATION_3_4,
-                        MIGRATION_4_5
+                        MIGRATION_4_5,
+                        MIGRATION_5_6
                     )
                     .build()
                     .also {

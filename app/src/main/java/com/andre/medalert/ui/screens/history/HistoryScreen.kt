@@ -60,6 +60,20 @@ import com.andre.medalert.viewmodel.HistoryViewModel
 
 private const val FILTER_ALL = "Todos"
 
+/**
+ * ATENÇÃO: esta tela AINDA NÃO usa offline-first de verdade.
+ *
+ * - O refresh chama api.getHistory (GET com body), rota que não existe na API; ele falha
+ *   e a tela cai no que está no Room.
+ * - O Room só tem as doses registradas localmente pela notificação ("Tomar agora"),
+ *   marcadas com isSynced = false e NUNCA enviadas à API.
+ * - A consulta é só do dia atual (HistoryRepository.observeHistory -> observeByUserOnDay).
+ *
+ * PENDENTE: ver com o backend a integração real do histórico (contrato do POST /api/historys
+ * e do GET de doses) antes de tratar esta tela como offline-first.
+ */
+
+
 @Composable
 fun HistoryScreen(
     onNavigate: (String) -> Unit = {},

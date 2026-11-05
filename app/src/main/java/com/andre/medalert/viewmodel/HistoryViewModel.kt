@@ -8,10 +8,10 @@ import com.andre.medalert.data.repository.HistoryRepository
 import com.andre.medalert.data.mapper.toHistoryUiModel
 import com.andre.medalert.data.model.HistoryUiModel
 import com.andre.medalert.data.schedule.SessionUser
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 sealed interface HistoryUiState {
@@ -27,12 +27,15 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
     private val _uiState = MutableStateFlow<HistoryUiState>(HistoryUiState.Loading)
     val uiState: StateFlow<HistoryUiState> = _uiState.asStateFlow()
 
+    private var observeJob: Job? = null
+
     init {
         load()
     }
 
     fun load() {
-        viewModelScope.launch {
+        observeJob?.cancel()
+        observeJob = viewModelScope.launch {
             _uiState.value = HistoryUiState.Loading
 
             val patientId = SessionUser.patientId(getApplication())
@@ -42,12 +45,15 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
             }
 
             val refresh = repository.refresh(patientId)
-            val saved = repository.observeHistory(patientId).first()
 
-            _uiState.value = if (saved.isEmpty() && refresh.isFailure) {
-                HistoryUiState.Error()
-            } else {
-                HistoryUiState.Content(saved.map { it.toHistoryUiModel() })
+            // Continua observando o Room: uma dose registrada pela notificação aparece
+            // na tela na hora, mesmo com a tela já aberta.
+            repository.observeHistory(patientId).collect { saved ->
+                _uiState.value = if (saved.isEmpty() && refresh.isFailure) {
+                    HistoryUiState.Error()
+                } else {
+                    HistoryUiState.Content(saved.map { it.toHistoryUiModel() })
+                }
             }
         }
     }

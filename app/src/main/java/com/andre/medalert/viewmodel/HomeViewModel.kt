@@ -10,16 +10,23 @@ import com.andre.medalert.data.schedule.DoseScheduleCalculator
 import com.andre.medalert.data.schedule.SessionMedications
 import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.schedule.SessionUser
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import com.andre.medalert.data.repository.HistoryRepository
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 data class HomeDoseUi(
@@ -27,7 +34,9 @@ data class HomeDoseUi(
     val medicationName: String,
     val dosage: String,
     val time: String,
-    val isPast: Boolean
+    val isPast: Boolean,
+    /** true quando a dose foi registrada como tomada (pela notificação). */
+    val isTaken: Boolean = false
 )
 
 data class HomeUiState(
@@ -42,6 +51,7 @@ data class HomeUiState(
 private val HORA_FORMAT = DateTimeFormatter.ofPattern("HH:mm")
 private val DATA_FORMAT = DateTimeFormatter.ofPattern("dd/MM")
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private val prefs = UserPreferencesRepository(application)
@@ -58,13 +68,36 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Doses já tomadas (registradas pela notificação), como "idLocal-horárioPrevistoMillis".
+     * Observa o Room, então a Home atualiza sozinha quando "Tomar agora" é tocado.
+     */
+    private val takenKeys: Flow<Set<String>> = flow {
+        emit(SessionUser.patientId(application))
+    }.flatMapLatest { patientId ->
+        if (patientId == null) {
+            flowOf(emptySet())
+        } else {
+            val fromMillis = LocalDate.now().minusDays(1)
+                .atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            historyRepository.observeLocalTaken(patientId, fromMillis).map { rows ->
+                rows.mapNotNull { row ->
+                    val medId = row.medicationLocalId
+                    val scheduled = row.previstoEm
+                    if (medId != null && scheduled != null) "$medId-$scheduled" else null
+                }.toSet()
+            }
+        }
+    }
+
     val uiState: StateFlow<HomeUiState> = combine(
         prefs.userName,
         SessionMedications.observe(application),
         ticker,
-        adherence
-    ) { name, medications, now, adherenceLabel ->
-        build(name, medications, now, adherenceLabel)
+        adherence,
+        takenKeys
+    ) { name, medications, now, adherenceLabel, taken ->
+        build(name, medications, now, adherenceLabel, taken)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
     init {
@@ -84,19 +117,23 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         name: String?,
         medications: List<MedicationEntity>,
         now: LocalDateTime,
-        adherenceLabel: String
+        adherenceLabel: String,
+        takenKeys: Set<String>
     ): HomeUiState {
         val active = medications.filter { it.ativo }
         val today = now.toLocalDate()
+        val zone = ZoneId.systemDefault()
         val doses = DoseScheduleCalculator.dosesOnDay(active, today)
 
         val dosesUi = doses.map {
+            val scheduledMillis = it.at.atZone(zone).toInstant().toEpochMilli()
             HomeDoseUi(
                 key = "${it.medicationLocalId}-${it.at}",
                 medicationName = it.medicationName,
                 dosage = it.dosage,
                 time = it.at.format(HORA_FORMAT),
-                isPast = it.at.isBefore(now)
+                isPast = it.at.isBefore(now),
+                isTaken = "${it.medicationLocalId}-$scheduledMillis" in takenKeys
             )
         }
 

@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Medication
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.People
@@ -41,10 +42,11 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.andre.medalert.ui.components.BottomNavigationBar
 import com.andre.medalert.ui.components.DosyLogo
-import com.andre.medalert.ui.components.ReminderPermissionCard
+import com.andre.medalert.ui.components.NotificationPermissionDialog
 import com.andre.medalert.ui.theme.MedAlertBackground
 import com.andre.medalert.ui.theme.MedAlertCard
 import com.andre.medalert.ui.theme.MedAlertPrimary
+import com.andre.medalert.ui.theme.MedAlertStatusGreen
 import com.andre.medalert.ui.theme.MedAlertTextPrimary
 import com.andre.medalert.ui.theme.MedAlertTextSecondary
 import com.andre.medalert.viewmodel.HomeDoseUi
@@ -52,8 +54,9 @@ import com.andre.medalert.viewmodel.HomeViewModel
 
 /**
  * Home com dados reais: nome salvo na sessão e doses previstas calculadas a partir do Room.
- * Não há status "tomado" aqui: ele só existirá quando houver histórico de administração.
+ * Uma dose aparece como "Tomado" quando foi registrada pela notificação ("Tomar agora").
  * O número de responsáveis depende de um endpoint de listagem que ainda não existe no backend.
+ * As permissões de notificação/alarme exato são pedidas por um popup ao entrar no app.
  */
 @Composable
 fun HomeScreen(
@@ -65,6 +68,9 @@ fun HomeScreen(
     viewModel: HomeViewModel = viewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
+
+    // Popup de permissões (aparece uma vez por abertura do app, se faltar algo).
+    NotificationPermissionDialog(refreshKey = permissionRefreshKey)
 
     Scaffold(
         containerColor = MedAlertBackground,
@@ -87,8 +93,6 @@ fun HomeScreen(
             )
 
             Spacer(modifier = Modifier.height(20.dp))
-
-            ReminderPermissionCard(refreshKey = permissionRefreshKey)
 
             if (state.upcomingTimes.isNotEmpty()) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -217,6 +221,17 @@ private fun UpcomingTimeChip(time: String) {
 
 @Composable
 private fun MedicationDoseRow(dose: HomeDoseUi) {
+    val iconColor = when {
+        dose.isTaken -> MedAlertStatusGreen
+        dose.isPast -> MedAlertTextSecondary
+        else -> MedAlertPrimary
+    }
+    val iconBackground = when {
+        dose.isTaken -> MedAlertStatusGreen.copy(alpha = 0.15f)
+        dose.isPast -> MedAlertBackground
+        else -> MedAlertPrimary.copy(alpha = 0.15f)
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -227,16 +242,13 @@ private fun MedicationDoseRow(dose: HomeDoseUi) {
         Box(
             modifier = Modifier
                 .size(36.dp)
-                .background(
-                    color = if (dose.isPast) MedAlertBackground else MedAlertPrimary.copy(alpha = 0.15f),
-                    shape = CircleShape
-                ),
+                .background(color = iconBackground, shape = CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                Icons.Filled.Medication,
+                imageVector = if (dose.isTaken) Icons.Filled.Check else Icons.Filled.Medication,
                 contentDescription = null,
-                tint = if (dose.isPast) MedAlertTextSecondary else MedAlertPrimary,
+                tint = iconColor,
                 modifier = Modifier.size(18.dp)
             )
         }
@@ -248,12 +260,22 @@ private fun MedicationDoseRow(dose: HomeDoseUi) {
             Text(dose.dosage, color = MedAlertTextSecondary, fontSize = 12.sp)
         }
 
-        Text(
-            text = dose.time,
-            color = if (dose.isPast) MedAlertTextSecondary else MedAlertTextPrimary,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold
-        )
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                text = dose.time,
+                color = if (dose.isPast) MedAlertTextSecondary else MedAlertTextPrimary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold
+            )
+            if (dose.isTaken) {
+                Text(
+                    text = "Tomado",
+                    color = MedAlertStatusGreen,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
     }
 }
 
