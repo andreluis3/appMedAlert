@@ -22,6 +22,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.andre.medalert.data.mapper.toMedication
+import com.andre.medalert.data.session.AccessPolicy
+import com.andre.medalert.ui.components.BlockForCaregiver
 import com.andre.medalert.data.remote.SessionManager
 import com.andre.medalert.notification.MedicationReminderManager
 import com.andre.medalert.notification.NotificationHelper
@@ -61,7 +63,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         NotificationHelper.createNotificationChannel(this)
 
-        // A permissão de notificações NÃO é pedida aqui: a Home explica o motivo e pede (ReminderPermissionCard).
+        // A permissão de notificações NÃO é pedida aqui: a Home mostra o NotificationPermissionDialog.
 
         setContent {
             MedAlertTheme {
@@ -278,11 +280,20 @@ class MainActivity : ComponentActivity() {
                         val medicationViewModel: MedicationViewModel =
                             viewModel()
 
-                        val savedUserId by userPreferences.userId
+                        // Paciente: o próprio id. Cuidador: o paciente vinculado (nunca o id do cuidador).
+                        val session by userPreferences.session
                             .collectAsState(initial = null)
 
-                        LaunchedEffect(savedUserId) {
-                            savedUserId?.let {
+                        val patientId = session?.let {
+                            AccessPolicy.patientIdFor(it.tipo, it.userId, it.pacienteId)
+                        }
+                        val isCaregiver = session?.let { AccessPolicy.isCaregiver(it.tipo) } ?: false
+                        val awaitingLink = session?.let {
+                            AccessPolicy.isAwaitingLink(it.tipo, it.userId, it.pacienteId)
+                        } ?: false
+
+                        LaunchedEffect(patientId) {
+                            patientId?.let {
                                 medicationViewModel.setUser(it)
                             }
                         }
@@ -312,25 +323,30 @@ class MainActivity : ComponentActivity() {
                             },
                             onDeleteConfirm = { medication ->
                                 medicationViewModel.deleteMedication(medication.localId)
-                            }
+                            },
+                            readOnly = isCaregiver,
+                            awaitingLink = awaitingLink
                         )
                     }
 
                     // Cadastro de medicamento.
                     composable("cadastro_med") {
-                        CadastroMedScreen(
-                            onSuccess = {
-                                navController.navigate("home") {
-                                    popUpTo("home") {
-                                        inclusive = false
+                        // Cuidador é somente leitura: não cadastra medicamentos.
+                        BlockForCaregiver(onBlocked = { navController.popBackStack() }) {
+                            CadastroMedScreen(
+                                onSuccess = {
+                                    navController.navigate("home") {
+                                        popUpTo("home") {
+                                            inclusive = false
+                                        }
+                                        launchSingleTop = true
                                     }
-                                    launchSingleTop = true
+                                },
+                                onBackClick = {
+                                    navController.popBackStack()
                                 }
-                            },
-                            onBackClick = {
-                                navController.popBackStack()
-                            }
-                        )
+                            )
+                        }
                     }
 
                     // Edição de medicamento (medId = ID local do Room).
@@ -345,16 +361,19 @@ class MainActivity : ComponentActivity() {
                         val medId =
                             backStackEntry.arguments?.getLong("medId") ?: 0L
 
-                        EditarMedicamentoScreen(
-                            localId = medId,
-                            // A lista observa o Room, então ao voltar já mostra os dados novos.
-                            onSuccess = {
-                                navController.popBackStack()
-                            },
-                            onBackClick = {
-                                navController.popBackStack()
-                            }
-                        )
+                        // Cuidador é somente leitura: não edita medicamentos.
+                        BlockForCaregiver(onBlocked = { navController.popBackStack() }) {
+                            EditarMedicamentoScreen(
+                                localId = medId,
+                                // A lista observa o Room, então ao voltar já mostra os dados novos.
+                                onSuccess = {
+                                    navController.popBackStack()
+                                },
+                                onBackClick = {
+                                    navController.popBackStack()
+                                }
+                            )
+                        }
                     }
 
                     // Calendário.
