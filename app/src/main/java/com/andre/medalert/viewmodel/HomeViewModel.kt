@@ -9,7 +9,10 @@ import com.andre.medalert.data.repository.MedicationRepository
 import com.andre.medalert.data.schedule.DoseScheduleCalculator
 import com.andre.medalert.data.schedule.SessionMedications
 import com.andre.medalert.data.local.UserPreferencesRepository
+import com.andre.medalert.data.schedule.LocalAdherence
 import com.andre.medalert.data.schedule.SessionUser
+import com.andre.medalert.data.session.AccessPolicy
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -45,7 +48,9 @@ data class HomeUiState(
     val dosesToday: List<HomeDoseUi> = emptyList(),
     val upcomingTimes: List<String> = emptyList(),
     val medicationsToday: Int = 0,
-    val adherenceLabel: String = "Sem dados"
+    val adherenceLabel: String = "Sem dados",
+    /** Cuidador sem paciente vinculado: a Home mostra o aviso em vez de uma tela vazia. */
+    val awaitingLink: Boolean = false
 )
 
 private val HORA_FORMAT = DateTimeFormatter.ofPattern("HH:mm")
@@ -90,14 +95,18 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private val awaitingLink: Flow<Boolean> = prefs.session
+        .map { AccessPolicy.isAwaitingLink(it.tipo, it.userId, it.pacienteId) }
+        .distinctUntilChanged()
+
     val uiState: StateFlow<HomeUiState> = combine(
         prefs.userName,
         SessionMedications.observe(application),
         ticker,
         adherence,
-        takenKeys
-    ) { name, medications, now, adherenceLabel, taken ->
-        build(name, medications, now, adherenceLabel, taken)
+        takenKeys.combine(awaitingLink) { taken, awaiting -> taken to awaiting }
+    ) { name, medications, now, adherenceLabel, (taken, awaiting) ->
+        build(name, medications, now, adherenceLabel, taken).copy(awaitingLink = awaiting)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
     init {
@@ -105,11 +114,18 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             val patientId = SessionUser.patientId(getApplication()) ?: return@launch
             // Offline-first: se falhar, a Home continua com o que já está no Room.
             medicationRepository.refresh(patientId)
-            runCatching { historyRepository.getDashboard(patientId) }
-                .onSuccess { dashboard ->
-                    adherence.value =
-                        if (dashboard.dosesEsp > 0) formatPercent(dashboard.adesao) else "Sem dados"
-                }
+            val dashboard = runCatching { historyRepository.getDashboard(patientId) }.getOrNull()
+            adherence.value = if (dashboard != null && dashboard.dosesEsp > 0) {
+                formatPercent(dashboard.adesao)
+            } else {
+                // Sem internet, erro do servidor ou servidor sem dados: calcula com o Room.
+                runCatching { LocalAdherence.compute(getApplication(), patientId) }
+                    .getOrNull()
+                    ?.takeIf { it.expected > 0 }
+                    ?.percent
+                    ?.let { "$it%" }
+                    ?: "Sem dados"
+            }
         }
     }
 

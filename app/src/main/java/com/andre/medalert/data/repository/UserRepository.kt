@@ -1,6 +1,6 @@
 package com.andre.medalert.data.repository
 
-import android.util.Log
+import com.andre.medalert.util.AppLog
 import com.andre.medalert.data.model.User
 import com.andre.medalert.data.remote.ApiService
 import com.andre.medalert.data.remote.RetrofitClient
@@ -13,9 +13,6 @@ import com.andre.medalert.data.remote.dto.LoginRequest
 import com.andre.medalert.data.remote.dto.LoginResponse
 import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.remote.dto.toDomain
-import com.google.gson.Gson
-import com.google.gson.JsonObject
-import com.google.gson.JsonParser
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -33,8 +30,6 @@ class UserRepository(
     private val userPreferences: UserPreferencesRepository
 ) {
 
-    private val gson = Gson()
-
     val isLoggedIn: Flow<Boolean> = userPreferences.isLoggedIn
     val userId: Flow<Int?> = userPreferences.userId
     val token: Flow<String?> = userPreferences.token
@@ -48,7 +43,7 @@ class UserRepository(
      */
     suspend fun createUser(request: CreateUserRequest): CreateUserResponse {
         val raw = withContext(Dispatchers.IO) { api.createUser(request.data).use { it.string() } }
-        Log.d("USER_REPO", "createUser corpo=$raw")
+        AppLog.d("USER_REPO", "createUser: resposta recebida")
 
         val id = extractId(raw)
         if (id == null || id <= 0) {
@@ -65,7 +60,7 @@ class UserRepository(
      */
     suspend fun createCuidador(request: CreateCuidadorRequest): CreateUserResponse {
         val raw = withContext(Dispatchers.IO) { api.createCuidador(request).use { it.string() } }
-        Log.d("USER_REPO", "createCuidador corpo=$raw")
+        AppLog.d("USER_REPO", "createCuidador: resposta recebida")
 
         val id = extractId(raw)
         if (id == null || id <= 0) {
@@ -86,7 +81,7 @@ class UserRepository(
             val raw = withContext(Dispatchers.IO) {
                 api.login(LoginRequest(email = email, senha = senha)).use { it.string() }
             }
-            Log.d("USER_REPO", "login corpo=$raw")
+            AppLog.d("USER_REPO", "login: resposta recebida")
 
             val response = parseLogin(raw)
             if (response == null) {
@@ -98,14 +93,15 @@ class UserRepository(
                     token = user.token,
                     tipo = user.tipo,
                     pacienteId = user.pacienteId,
-                    nome = user.nome.takeIf { it.isNotBlank() }
+                    nome = user.nome.takeIf { it.isNotBlank() },
+                    email = email.trim()
                 )
                 Result.success(user)
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: HttpException) {
-            Log.e("USER_REPO", "Login HTTP ${e.code()}", e)
+            AppLog.e("USER_REPO", "Login HTTP ${e.code()}", e)
             if (e.code() == 401) {
                 val corpo = try {
                     e.response()?.errorBody()?.string()
@@ -117,7 +113,7 @@ class UserRepository(
                 Result.failure(e)
             }
         } catch (e: Exception) {
-            Log.e("USER_REPO", "Falha no login", e)
+            AppLog.e("USER_REPO", "Falha no login", e)
             Result.failure(e)
         }
     }
@@ -134,45 +130,11 @@ class UserRepository(
         throw NotImplementedError("Endpoint de alterar senha ainda não implementado no backend.")
     }
 
-    // ---------- helpers de parse ----------
+    // ---------- helpers de parse (ver LoginParser) ----------
 
-    /** Devolve o LoginResponse se houver um id > 0; senão null. */
-    private fun parseLogin(raw: String): LoginResponse? {
-        val puro = raw.trim().trim('"').toIntOrNull()
-        if (puro != null) {
-            return if (puro > 0) LoginResponse(id = puro, tipo = "paciente") else null
-        }
-        val obj = asJsonObject(raw) ?: return null
-        val parsed = try {
-            gson.fromJson(obj, LoginResponse::class.java)
-        } catch (e: Exception) {
-            null
-        } ?: return null
-        // Versões antigas mandavam "userId" em vez de "id".
-        val id = parsed.id ?: obj.get("userId")?.takeIf { it.isJsonPrimitive }?.asString?.toIntOrNull()
-        return if (id != null && id > 0) parsed.copy(id = id) else null
-    }
+    private fun parseLogin(raw: String): LoginResponse? = LoginParser.parseLogin(raw)
 
-    /** Aceita "4", "\"4\"" ou {"id": 4} / {"userId": 4}. Devolve null se não achar ID. */
-    private fun extractId(raw: String): Int? {
-        raw.trim().trim('"').toIntOrNull()?.let { return it }
-        val obj = asJsonObject(raw) ?: return null
-        return listOf("id", "userId").firstNotNullOfOrNull { key ->
-            obj.get(key)?.takeIf { it.isJsonPrimitive }?.asString?.toIntOrNull()
-        }
-    }
+    private fun extractId(raw: String): Int? = LoginParser.extractId(raw)
 
-    /** Pega o "message" de {"message": "..."}, se existir. */
-    private fun extractMessage(raw: String): String? {
-        val obj = asJsonObject(raw) ?: return null
-        return obj.get("message")?.takeIf { it.isJsonPrimitive }?.asString
-    }
-
-    private fun asJsonObject(raw: String): JsonObject? {
-        return try {
-            JsonParser.parseString(raw).takeIf { it.isJsonObject }?.asJsonObject
-        } catch (e: Exception) {
-            null
-        }
-    }
+    private fun extractMessage(raw: String): String? = LoginParser.extractMessage(raw)
 }

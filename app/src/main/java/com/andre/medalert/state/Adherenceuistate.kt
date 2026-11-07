@@ -18,6 +18,18 @@ sealed interface AdherenceUiState {
         val message: String = "Não foi possível carregar os dados."
     ) : AdherenceUiState
 
-    /** Resposta recebida (a tela trata sozinha o caso de dosesEsp == 0). */
-    data class Success(val data: DashboardResponse) : AdherenceUiState
+    /**
+     * Cuidador logado que ainda não tem paciente vinculado: não há dados para mostrar
+     * (e a tela não deve fingir que há nem tratar como erro).
+     */
+    object AwaitingLink : AdherenceUiState
+
+    /**
+     * Resposta recebida (a tela trata sozinha o caso de dosesEsp == 0).
+     * [isLocal] = true: dados calculados no aparelho (Room) porque o servidor não respondeu.
+     */
+    data class Success(
+        val data: DashboardResponse,
+        val isLocal: Boolean = false
+    ) : AdherenceUiState
 }

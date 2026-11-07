@@ -19,8 +19,15 @@ data class Medication(
     val endDate: String? = null,
     val notes: String? = null,
     val active: Boolean = true,
-    val localId: Long = 0L
-)
+    val localId: Long = 0L,
+    /** Estoque atual (base menos o consumo local); null = sem controle de estoque. */
+    val stock: Int? = null,
+    val stockMinimum: Int? = null
+) {
+    /** Estoque no mínimo ou abaixo dele (ou zerado). */
+    val isLowStock: Boolean
+        get() = stock != null && (stock == 0 || (stockMinimum != null && stock <= stockMinimum))
+}
 
 enum class DoseStatus {
     TAKEN,

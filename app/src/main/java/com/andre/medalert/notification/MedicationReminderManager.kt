@@ -5,6 +5,8 @@ import com.andre.medalert.data.local.AppDatabase
 import com.andre.medalert.data.local.entity.MedicationEntity
 import com.andre.medalert.data.schedule.DoseScheduleCalculator
 import com.andre.medalert.data.local.UserPreferencesRepository
+import com.andre.medalert.data.session.AccessPolicy
+import com.andre.medalert.data.session.AlarmTarget
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
@@ -74,30 +76,39 @@ object MedicationReminderManager {
         store.save(scheduled)
     }
 
-    /** Relê o Room e reagenda tudo (abrir o app, boot, troca de fuso, permissão de alarme exato). */
+    /**
+     * Relê o Room e reagenda tudo (abrir o app, boot, troca de fuso, permissão de alarme exato).
+     * - Paciente: reagenda os medicamentos dele.
+     * - Sem sessão: cancela tudo.
+     * - Cuidador: não faz nada (não cancela os alarmes do paciente e não cria alarmes novos).
+     */
     suspend fun rescheduleAll(context: Context, notBeforeMillis: Long? = null) {
         val app = context.applicationContext
-        val medications = withContext(Dispatchers.IO) { loadPatientMedications(app) }
-        apply(app, medications, notBeforeMillis)
+        val session = UserPreferencesRepository(app).session.first()
+
+        when (val target = AccessPolicy.alarmTarget(session.tipo, session.userId)) {
+            AlarmTarget.KeepUntouched -> return
+            AlarmTarget.ClearAll -> apply(app, emptyList(), notBeforeMillis)
+            is AlarmTarget.Patient -> {
+                val medications = withContext(Dispatchers.IO) { loadPatientMedications(app, target.userId) }
+                apply(app, medications, notBeforeMillis)
+            }
+        }
     }
 
     /** Medicamento que ainda deve gerar notificação: existe, está ativo e é do paciente da sessão. */
     suspend fun findDeliverable(context: Context, localId: Long): MedicationEntity? =
         withContext(Dispatchers.IO) {
             val app = context.applicationContext
-            val prefs = UserPreferencesRepository(app)
-            if (prefs.userType.first() != "paciente") return@withContext null
-            val userId = prefs.userId.first() ?: return@withContext null
+            val session = UserPreferencesRepository(app).session.first()
+            if (AccessPolicy.isCaregiver(session.tipo)) return@withContext null
+            val userId = session.userId?.takeIf { it > 0 } ?: return@withContext null
 
             AppDatabase.getInstance(app).medicationDao().getById(localId)
                 ?.takeIf { it.ativo && it.userId == userId }
         }
 
-    private suspend fun loadPatientMedications(app: Context): List<MedicationEntity> {
-        val prefs = UserPreferencesRepository(app)
-        if (prefs.userType.first() != "paciente") return emptyList()
-        val userId = prefs.userId.first()?.takeIf { it > 0 } ?: return emptyList()
-
+    private suspend fun loadPatientMedications(app: Context, userId: Int): List<MedicationEntity> {
         val dao = AppDatabase.getInstance(app).medicationDao()
         return dao.getSyncedByUser(userId) + dao.getUnsyncedByUser(userId)
     }

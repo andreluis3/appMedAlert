@@ -144,10 +144,11 @@ fun EditarMedicamentoScreen(
                         MedAlertTextField(
                             value = form.dosagem,
                             onValueChange = { v ->
-                                viewModel.update { it.copy(dosagem = v.filter(Char::isDigit)) }
+                                // Mesmo filtro do cadastro: aceita 0,5 / 2.5 sem perder os decimais.
+                                viewModel.update { it.copy(dosagem = filtrarDecimal(v)) }
                             },
                             placeholder = "",
-                            keyboardType = KeyboardType.Number
+                            keyboardType = KeyboardType.Decimal
                         )
                     }
                     Column(modifier = Modifier.weight(1f)) {

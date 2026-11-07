@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Medication
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material3.*
@@ -25,9 +26,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.andre.medalert.data.mock.MockData
 import com.andre.medalert.data.model.Medication
 import com.andre.medalert.ui.components.BottomNavigationBar
+import com.andre.medalert.ui.components.CaregiverAwaitingLinkState
 import com.andre.medalert.ui.theme.MedAlertBackground
 import com.andre.medalert.ui.theme.MedAlertCard
 import com.andre.medalert.ui.theme.MedAlertPrimary
@@ -36,13 +37,17 @@ import com.andre.medalert.ui.theme.MedAlertTextSecondary
 
 @Composable
 fun MedicationsScreen(
-    medications: List<Medication> = MockData.medications,
+    medications: List<Medication> = emptyList(),
     errorMessage: String? = null,
     onNavigate: (String) -> Unit = {},
     onAddClick: () -> Unit = {},
     onEditClick: (Medication) -> Unit = {},
     // Chamado depois que o usuário confirma o diálogo de exclusão.
-    onDeleteConfirm: (Medication) -> Unit = {}
+    onDeleteConfirm: (Medication) -> Unit = {},
+    // Cuidador: só consulta (sem adicionar, editar ou excluir). O Repository também bloqueia.
+    readOnly: Boolean = false,
+    // Cuidador sem paciente vinculado: mostra o aviso em vez de uma lista vazia sem explicação.
+    awaitingLink: Boolean = false
 ) {
     var medicationToDelete by remember { mutableStateOf<Medication?>(null) }
 
@@ -52,6 +57,13 @@ fun MedicationsScreen(
             BottomNavigationBar(selectedRoute = "medications", onItemClick = onNavigate)
         }
     ) { innerPadding ->
+        if (awaitingLink) {
+            Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+                CaregiverAwaitingLinkState()
+            }
+            return@Scaffold
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -62,7 +74,11 @@ fun MedicationsScreen(
         ) {
             Text("Medicamentos", color = MedAlertTextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(4.dp))
-            Text("Gerencie seus medicamentos", color = MedAlertTextSecondary, fontSize = 14.sp)
+            Text(
+                if (readOnly) "Medicamentos do paciente • somente consulta" else "Gerencie seus medicamentos",
+                color = MedAlertTextSecondary,
+                fontSize = 14.sp
+            )
 
             if (errorMessage != null) {
                 Spacer(modifier = Modifier.height(12.dp))
@@ -80,7 +96,7 @@ fun MedicationsScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        "Nenhum medicamento cadastrado",
+                        if (readOnly) "O paciente ainda não tem medicamentos cadastrados" else "Nenhum medicamento cadastrado",
                         color = MedAlertTextSecondary,
                         fontSize = 14.sp
                     )
@@ -91,6 +107,7 @@ fun MedicationsScreen(
             medications.forEach { medication ->
                 MedicationCard(
                     medication = medication,
+                    readOnly = readOnly,
                     onEditClick = { onEditClick(medication) },
                     onDeleteClick = { medicationToDelete = medication }
                 )
@@ -99,18 +116,20 @@ fun MedicationsScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            Button(
-                onClick = onAddClick,
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-                shape = RoundedCornerShape(28.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MedAlertPrimary,
-                    contentColor = MedAlertBackground
-                )
-            ) {
-                Icon(Icons.Filled.Add, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Adicionar medicamento", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            if (!readOnly) {
+                Button(
+                    onClick = onAddClick,
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    shape = RoundedCornerShape(28.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MedAlertPrimary,
+                        contentColor = MedAlertBackground
+                    )
+                ) {
+                    Icon(Icons.Filled.Add, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Adicionar medicamento", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
     }
@@ -131,6 +150,7 @@ fun MedicationsScreen(
 @Composable
 private fun MedicationCard(
     medication: Medication,
+    readOnly: Boolean,
     onEditClick: () -> Unit,
     onDeleteClick: () -> Unit
 ) {
@@ -190,6 +210,20 @@ private fun MedicationCard(
                 }
             }
         }
+
+        if (medication.stock != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            InfoChip(
+                icon = Icons.Filled.Inventory2,
+                text = when {
+                    medication.stock == 0 -> "Estoque esgotado"
+                    medication.isLowStock -> "Estoque baixo: ${medication.stock}"
+                    else -> "Estoque: ${medication.stock}"
+                }
+            )
+        }
+
+        if (readOnly) return@Column
 
         Spacer(modifier = Modifier.height(12.dp))
 

@@ -1,4 +1,3 @@
-
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -45,6 +44,8 @@ android {
 
     buildFeatures {
         compose = true
+        // BuildConfig.DEBUG é usado para desligar logs de rede/dados em release.
+        buildConfig = true
     }
 }
 
@@ -83,6 +84,9 @@ dependencies {
     // DataStore
     implementation(libs.androidx.datastore.preferences)
 
+    //worker 
+    implementation("androidx.work:work-runtime-ktx:2.10.1")
+
     // Media3
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.ui)
@@ -102,4 +106,6 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+
+
 }

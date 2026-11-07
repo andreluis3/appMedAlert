@@ -48,6 +48,7 @@ import com.andre.medalert.data.remote.dto.AdesaoRemedioDto
 import com.andre.medalert.data.remote.dto.DashboardResponse
 import com.andre.medalert.data.remote.dto.HorarioEsquecidoDto
 import com.andre.medalert.state.AdherenceUiState
+import com.andre.medalert.ui.components.CaregiverAwaitingLinkState
 import com.andre.medalert.ui.components.EmptyState
 import com.andre.medalert.ui.components.ErrorState
 import com.andre.medalert.ui.components.LoadingState
@@ -126,6 +127,8 @@ fun AdherenceScreen(
                     onRetryClick = onRetryClick
                 )
 
+                is AdherenceUiState.AwaitingLink -> CaregiverAwaitingLinkState()
+
                 is AdherenceUiState.Success -> {
                     if (uiState.data.dosesEsp == 0) {
                         EmptyState(
@@ -134,7 +137,17 @@ fun AdherenceScreen(
                             message = "Assim que você registrar suas primeiras doses, seu acompanhamento aparece aqui."
                         )
                     } else {
-                        AdherenceContent(data = uiState.data)
+                        Column {
+                            if (uiState.isLocal) {
+                                Text(
+                                    text = "Sem conexão com o servidor: dados dos últimos 7 dias calculados neste aparelho.",
+                                    color = MedAlertTextSecondary,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.padding(bottom = 8.dp)
+                                )
+                            }
+                            AdherenceContent(data = uiState.data)
+                        }
                     }
                 }
             }

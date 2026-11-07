@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.andre.medalert.ui.components.BottomNavigationBar
 import com.andre.medalert.ui.components.DosyLogo
+import com.andre.medalert.ui.components.CaregiverAwaitingLinkState
 import com.andre.medalert.ui.components.NotificationPermissionDialog
 import com.andre.medalert.ui.theme.MedAlertBackground
 import com.andre.medalert.ui.theme.MedAlertCard
@@ -93,6 +94,14 @@ fun HomeScreen(
             )
 
             Spacer(modifier = Modifier.height(20.dp))
+
+            if (state.awaitingLink) {
+                // Cuidador sem vínculo: explica a situação (altura fixa, pois estamos numa coluna rolável).
+                Box(modifier = Modifier.fillMaxWidth().height(360.dp)) {
+                    CaregiverAwaitingLinkState()
+                }
+                return@Column
+            }
 
             if (state.upcomingTimes.isNotEmpty()) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {

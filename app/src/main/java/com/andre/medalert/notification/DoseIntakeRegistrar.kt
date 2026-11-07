@@ -2,7 +2,9 @@ package com.andre.medalert.notification
 
 import android.content.Context
 import com.andre.medalert.data.local.AppDatabase
+import com.andre.medalert.data.schedule.StockRules
 import com.andre.medalert.data.repository.HistoryRepository
+import com.andre.medalert.sync.HistorySyncWorker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -25,8 +27,12 @@ enum class DoseRegisterResult {
  * Ponto único para registrar uma dose como tomada a partir da notificação.
  *
  * Funciona com o app fechado: lê o medicamento e grava no Room direto, sem depender de tela.
- * A dose é identificada por (medicamento local, horário previsto). O envio para a API ainda
- * não existe: o registro fica com isSynced = false (ver HistoryRepository.registerTakenLocally).
+ * Também desconta o estoque (quantidade por dose) e avisa se ficou baixo/esgotado.
+ * A dose é identificada por (medicamento local, horário previsto).
+ *
+ * O registro nasce com isSynced = false e, logo depois de gravado, é agendado o envio ao
+ * POST /api/historys ([HistorySyncWorker]). Sem internet o registro continua no Room e é
+ * enviado quando a conexão voltar; o estoque nunca é descontado de novo.
  */
 object DoseIntakeRegistrar {
 
@@ -42,17 +48,38 @@ object DoseIntakeRegistrar {
                 ?: return@withContext DoseRegisterResult.MEDICATION_UNAVAILABLE
 
             val repository = HistoryRepository(AppDatabase.getInstance(app).doseHistoryDao())
-            val inserted = repository.registerTakenLocally(
+            val result = repository.registerTakenLocally(
                 userId = med.userId,
                 medicationLocalId = med.id,
                 medicationRemoteId = med.remoteId,
                 medicationName = med.nome,
                 dosage = med.dosagem,
                 scheduledAtMillis = scheduledAtMillis,
-                takenAtMillis = takenAtMillis
+                takenAtMillis = takenAtMillis,
+                // Quantidade por dose do cadastro; sem informação, 1 unidade por dose.
+                quantityPerDose = med.quantidade ?: 1
             )
 
-            if (inserted) DoseRegisterResult.REGISTERED else DoseRegisterResult.ALREADY_REGISTERED
+            if (!result.inserted) return@withContext DoseRegisterResult.ALREADY_REGISTERED
+
+            // Estoque já foi descontado na mesma transação do registro. Aqui só avisa.
+            if (StockRules.shouldAlert(result.stockBefore, result.stockAfter, result.stockMinimum)) {
+                NotificationHelper.showLowStockNotification(
+                    context = app,
+                    localId = med.id,
+                    medicationName = med.nome,
+                    remaining = result.stockAfter ?: 0
+                )
+            }
+
+            // O registro local já está salvo: falhar ao agendar o envio não pode virar ERROR.
+            try {
+                HistorySyncWorker.enqueue(app)
+            } catch (_: Exception) {
+                // O envio será tentado de novo ao abrir o app.
+            }
+
+            DoseRegisterResult.REGISTERED
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

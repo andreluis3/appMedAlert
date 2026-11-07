@@ -4,7 +4,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -29,9 +28,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,56 +37,41 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.andre.medalert.data.model.CalendarDay
-import com.andre.medalert.data.schedule.DoseScheduleCalculator
+import com.andre.medalert.data.schedule.CalendarDayStatus
+import com.andre.medalert.data.schedule.CalendarDayUi
 import com.andre.medalert.data.schedule.labelPtBr
 import com.andre.medalert.ui.components.BottomNavigationBar
 import com.andre.medalert.ui.theme.MedAlertBackground
 import com.andre.medalert.ui.theme.MedAlertCard
 import com.andre.medalert.ui.theme.MedAlertPrimary
+import com.andre.medalert.ui.theme.MedAlertStatusGreen
+import com.andre.medalert.ui.theme.MedAlertStatusOrange
+import com.andre.medalert.ui.theme.MedAlertStatusRed
 import com.andre.medalert.ui.theme.MedAlertTextSecondary
-import com.andre.medalert.viewmodel.ScheduleViewModel
-import java.time.LocalDate
-import java.time.YearMonth
+import com.andre.medalert.viewmodel.CalendarViewModel
 
 private val weekDayLabels = listOf("D", "S", "T", "Q", "Q", "S", "S")
 
+private fun statusColor(status: CalendarDayStatus): Color = when (status) {
+    CalendarDayStatus.NONE -> Color.Transparent
+    CalendarDayStatus.PENDING -> MedAlertPrimary.copy(alpha = 0.25f)
+    CalendarDayStatus.ALL_TAKEN -> MedAlertStatusGreen.copy(alpha = 0.40f)
+    CalendarDayStatus.LATE -> MedAlertStatusOrange.copy(alpha = 0.40f)
+    CalendarDayStatus.MISSED -> MedAlertStatusRed.copy(alpha = 0.40f)
+}
+
 /**
- * Calendário com doses PREVISTAS (calculadas dos medicamentos do Room).
- * Status por dia (tomado/atrasado/não tomado) depende de histórico por data, que a API ainda não oferece.
+ * Calendário com doses PREVISTAS (agenda dos medicamentos) cruzadas com os registros de
+ * administração. O dia aparece mesmo sem nenhum registro; a cor mostra a situação das doses.
  */
 @Composable
 fun CalendarScreen(
     onNavigate: (String) -> Unit = {},
     onDayClick: (year: Int, month: Int, day: Int) -> Unit = { _, _, _ -> },
-    viewModel: ScheduleViewModel = viewModel()
+    viewModel: CalendarViewModel = viewModel()
 ) {
-    val medications by viewModel.medications.collectAsState()
-    var visibleMonth by remember { mutableStateOf(YearMonth.now()) }
-    val today = remember { LocalDate.now() }
-
-    val cells = remember(medications, visibleMonth) {
-        val daysWithDoses = DoseScheduleCalculator.dosesBetween(
-            medications,
-            visibleMonth.atDay(1).atStartOfDay(),
-            visibleMonth.plusMonths(1).atDay(1).atStartOfDay()
-        ).map { it.at.dayOfMonth }.toSet()
-
-        buildList {
-            // Domingo = coluna 0.
-            repeat(visibleMonth.atDay(1).dayOfWeek.value % 7) { add(CalendarDay(day = null)) }
-            for (d in 1..visibleMonth.lengthOfMonth()) {
-                add(
-                    CalendarDay(
-                        day = d,
-                        isToday = visibleMonth.atDay(d) == today,
-                        hasDoses = d in daysWithDoses
-                    )
-                )
-            }
-            while (size % 7 != 0) add(CalendarDay(day = null))
-        }
-    }
+    val state by viewModel.uiState.collectAsState()
+    val month = state.month
 
     Scaffold(
         containerColor = MedAlertBackground,
@@ -113,15 +94,15 @@ fun CalendarScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = visibleMonth.labelPtBr(),
+                    text = month.labelPtBr(),
                     color = MedAlertPrimary,
                     fontSize = 14.sp,
                     modifier = Modifier.weight(1f)
                 )
-                IconButton(onClick = { visibleMonth = visibleMonth.minusMonths(1) }) {
+                IconButton(onClick = { viewModel.showPreviousMonth() }) {
                     Icon(Icons.Filled.ChevronLeft, contentDescription = "Mês anterior", tint = MedAlertPrimary)
                 }
-                IconButton(onClick = { visibleMonth = visibleMonth.plusMonths(1) }) {
+                IconButton(onClick = { viewModel.showNextMonth() }) {
                     Icon(Icons.Filled.ChevronRight, contentDescription = "Próximo mês", tint = MedAlertPrimary)
                 }
             }
@@ -149,7 +130,7 @@ fun CalendarScreen(
                 }
                 Spacer(modifier = Modifier.height(8.dp))
 
-                cells.chunked(7).forEach { week ->
+                state.cells.chunked(7).forEach { week ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
@@ -158,7 +139,7 @@ fun CalendarScreen(
                             CalendarDayCell(
                                 dayUi = dayUi,
                                 onClick = {
-                                    dayUi.day?.let { onDayClick(visibleMonth.year, visibleMonth.monthValue, it) }
+                                    dayUi.day?.let { onDayClick(month.year, month.monthValue, it) }
                                 },
                                 modifier = Modifier.weight(1f)
                             )
@@ -170,13 +151,16 @@ fun CalendarScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            LegendRow(fill = MedAlertPrimary.copy(alpha = 0.25f), label = "Dia com doses previstas")
+            LegendRow(fill = MedAlertPrimary.copy(alpha = 0.25f), label = "Doses a tomar")
+            LegendRow(fill = MedAlertStatusGreen.copy(alpha = 0.40f), label = "Todas as doses tomadas")
+            LegendRow(fill = MedAlertStatusOrange.copy(alpha = 0.40f), label = "Dose atrasada ou tomada com atraso")
+            LegendRow(fill = MedAlertStatusRed.copy(alpha = 0.40f), label = "Dose não tomada")
             LegendRow(fill = Color.Transparent, ring = true, label = "Hoje")
 
             Spacer(modifier = Modifier.height(12.dp))
 
             Text(
-                text = "Toque em um dia para ver as doses previstas. O status de cada dose (tomada, atrasada ou não tomada) aparece quando houver registro de administração.",
+                text = "As doses previstas aparecem mesmo sem registro. A cor do dia mostra a situação das doses: pendente, tomada, atrasada ou não tomada. Toque em um dia para ver as doses previstas.",
                 color = MedAlertTextSecondary,
                 fontSize = 12.sp,
                 lineHeight = 17.sp
@@ -187,7 +171,7 @@ fun CalendarScreen(
 
 @Composable
 private fun CalendarDayCell(
-    dayUi: CalendarDay,
+    dayUi: CalendarDayUi,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -204,7 +188,7 @@ private fun CalendarDayCell(
             modifier = Modifier
                 .size(36.dp)
                 .clip(CircleShape)
-                .background(if (dayUi.hasDoses) MedAlertPrimary.copy(alpha = 0.25f) else Color.Transparent)
+                .background(statusColor(dayUi.status))
                 .then(
                     if (dayUi.isToday) Modifier.border(BorderStroke(1.5.dp, MedAlertPrimary), CircleShape)
                     else Modifier

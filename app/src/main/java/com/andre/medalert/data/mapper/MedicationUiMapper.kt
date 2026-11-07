@@ -1,6 +1,7 @@
 package com.andre.medalert.data.mapper
 
 import com.andre.medalert.data.local.entity.MedicationEntity
+import com.andre.medalert.data.local.entity.estoqueAtual
 import com.andre.medalert.data.local.entity.horariosLista
 import com.andre.medalert.data.model.Medication
 
@@ -35,6 +36,8 @@ fun MedicationEntity.toMedication(): Medication {
         endDate = dataFim,
         notes = observacoes,
         active = ativo,
-        localId = id
+        localId = id,
+        stock = estoqueAtual,
+        stockMinimum = estoqueMinimo
     )
 }

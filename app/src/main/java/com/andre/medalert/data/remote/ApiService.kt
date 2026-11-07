@@ -2,6 +2,7 @@ package com.andre.medalert.data.remote
 
 import com.andre.medalert.data.remote.dto.*
 import okhttp3.ResponseBody
+import retrofit2.Response
 import retrofit2.http.*
 
 /**
@@ -58,12 +59,14 @@ interface ApiService {
 
     // ---------- Histórico ----------
 
-    // TODO (etapa de histórico): o body da README é flat em snake_case
-    // (usuario_id, medicamento_id, previsto_para, status...). Este DTO ainda é o antigo.
+    // Registra uma dose TOMADA. Body confirmado no Postman:
+    // {"usuario_id": 2, "medicamento_id": 1, "tomado_em": "2026-11-06T14:45:00-03:00"}
+    // Devolve Response<ResponseBody> porque o corpo da resposta de sucesso não está documentado:
+    // o app só confere o código HTTP (2xx = confirmado) e nunca interpreta o corpo.
     @POST("api/historys")
-    suspend fun createHistory(@Body request: CreateHistoryRequest)
+    suspend fun createHistory(@Body request: DoseTakenRequest): Response<ResponseBody>
 
-    // Doses de hoje do paciente.
+    // Doses de hoje do paciente. A resposta não traz medicamento_id nem id da dose.
     @GET("api/historys/doseDia/{usuarioId}")
     suspend fun getDosesDia(@Path("usuarioId") usuarioId: Int): List<HistoryRecordDto>
 

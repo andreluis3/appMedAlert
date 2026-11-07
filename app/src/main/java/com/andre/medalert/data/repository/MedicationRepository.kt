@@ -1,10 +1,8 @@
 package com.andre.medalert.data.repository
 
-import android.util.Log
 import com.andre.medalert.data.local.dao.MedicationDao
 import com.andre.medalert.data.local.entity.MedicationEntity
 import com.andre.medalert.data.mapper.HorarioDose
-import com.andre.medalert.data.mapper.formatarNumero
 import com.andre.medalert.data.mapper.toEntity
 import com.andre.medalert.data.mapper.toMedicamentoDataOrNull
 import com.andre.medalert.data.mapper.withIsoDates
@@ -13,6 +11,9 @@ import com.andre.medalert.data.remote.RetrofitClient
 import com.andre.medalert.data.remote.dto.EditMedicamentoRequest
 import com.andre.medalert.data.remote.dto.MedicamentoData
 import com.andre.medalert.data.local.UserPreferencesRepository
+import com.andre.medalert.data.session.AccessPolicy
+import com.andre.medalert.data.session.SessionInfo
+import com.andre.medalert.util.AppLog
 import com.google.gson.Gson
 import com.google.gson.JsonParser
 import kotlinx.coroutines.CancellationException
@@ -35,6 +36,13 @@ private const val TAG = "MedicationRepo"
  */
 private val cadastroMutex = Mutex()
 private val envioMutex = Mutex()
+
+/**
+ * Cuidador tem acesso SOMENTE LEITURA. Este bloqueio fica na camada de dados (e não só nos
+ * botões da tela) para que nenhum caminho de código grave medicamentos como cuidador.
+ */
+class CaregiverReadOnlyException :
+    Exception("Cuidadores só podem consultar os medicamentos do paciente. Alterações não são permitidas.")
 
 /** Resultado de um cadastro bem-sucedido. */
 enum class SaveOutcome {
@@ -101,23 +109,40 @@ class MedicationRepository(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.w(TAG, "Falha ao atualizar a lista", e)
+            AppLog.w(TAG, "Falha ao atualizar a lista", e)
             Result.failure(e)
         }
 
-    /** Atalho: atualiza a lista do usuário que está na sessão. */
+    /** Atalho: atualiza a lista do PACIENTE da sessão (o próprio paciente, ou o vinculado ao cuidador). */
     suspend fun refreshForCurrentUser(): Result<Unit> {
-        val userId = userPrefs.userId.first()
+        val session = userPrefs.session.first()
+        val patientId = AccessPolicy.patientIdFor(session.tipo, session.userId, session.pacienteId)
 
-        if (userId == null || userId <= 0) {
+        if (patientId == null) {
             return Result.failure(
-                Exception("Sessão expirada. Faça login novamente.")
+                Exception("Sessão expirada ou sem paciente vinculado. Faça login novamente.")
             )
         }
 
-        Log.d(TAG, "refreshForCurrentUser($userId)")
+        AppLog.d(TAG, "refreshForCurrentUser($patientId)")
 
-        return refresh(userId)
+        return refresh(patientId)
+    }
+
+    /**
+     * Sessão autorizada a ALTERAR medicamentos: só paciente logado.
+     * Cuidador recebe [CaregiverReadOnlyException]; sem sessão, "sessão expirada".
+     */
+    private suspend fun sessionForWrite(): Result<SessionInfo> {
+        val session = userPrefs.session.first()
+        if (!AccessPolicy.canModifyMedications(session.tipo)) {
+            return Result.failure(CaregiverReadOnlyException())
+        }
+        val userId = session.userId
+        if (userId == null || userId <= 0) {
+            return Result.failure(Exception("Sessão expirada. Faça login novamente."))
+        }
+        return Result.success(session)
     }
 
     /**
@@ -137,10 +162,8 @@ class MedicationRepository(
      * - outros erros HTTP / inesperados: devolve erro, mas o registro continua no Room.
      */
     suspend fun saveMedicationForCurrentUser(draft: MedicamentoData): Result<SaveOutcome> {
-        val userId = userPrefs.userId.first()
-        if (userId == null || userId <= 0) {
-            return Result.failure(Exception("Sessão expirada. Faça login novamente."))
-        }
+        val session = sessionForWrite().getOrElse { return Result.failure(it) }
+        val userId = session.userId ?: return Result.failure(Exception("Sessão expirada. Faça login novamente."))
 
         if (!HorarioDose.ehHoraLocal(draft.horarioDose)) {
             return Result.failure(Exception("Informe um horário válido para a primeira dose."))
@@ -161,7 +184,7 @@ class MedicationRepository(
             }
 
             is Envio.SemConexao -> {
-                Log.w(TAG, "Sem conexão ao salvar medicamento; ficou pendente (id local=$localId)")
+                AppLog.w(TAG, "Sem conexão ao salvar medicamento; ficou pendente (id local=$localId)")
                 Result.success(SaveOutcome.SAVED_OFFLINE)
             }
 
@@ -172,19 +195,19 @@ class MedicationRepository(
                     mensagemParaHttp(envio.code, envio.errorBody) +
                             " O medicamento ficou salvo no celular como pendente."
                 }
-                Log.w(TAG, "HTTP ${envio.code} ao salvar; mantido como pendente (id local=$localId)")
+                AppLog.w(TAG, "HTTP ${envio.code} ao salvar; mantido como pendente (id local=$localId)")
                 Result.failure(Exception(mensagem))
             }
 
             is Envio.Invalido -> {
-                Log.e(TAG, "Pendente $localId inválido: ${envio.motivo}")
+                AppLog.e(TAG, "Pendente $localId inválido: ${envio.motivo}")
                 Result.failure(
                     Exception("Os dados do medicamento estão incompletos. Ele ficou salvo no celular.")
                 )
             }
 
             is Envio.Falha -> {
-                Log.e(TAG, "Erro inesperado ao salvar medicamento (id local=$localId)", envio.erro)
+                AppLog.e(TAG, "Erro inesperado ao salvar medicamento (id local=$localId)", envio.erro)
                 Result.failure(
                     Exception("Não foi possível enviar agora. O medicamento ficou salvo no celular como pendente.")
                 )
@@ -203,9 +226,13 @@ class MedicationRepository(
      * traz da API o que só ela calcula (ex.: horários). Em caso de erro da API, o Room NÃO muda.
      */
     suspend fun editMedication(localId: Long, changes: Map<String, Any?>): Result<Unit> {
+        val session = sessionForWrite().getOrElse { return Result.failure(it) }
         if (changes.isEmpty()) return Result.success(Unit)
         val entity = dao.getById(localId)
             ?: return Result.failure(Exception("Medicamento não encontrado."))
+        if (entity.userId != session.userId) {
+            return Result.failure(Exception("Este medicamento não pertence à conta atual."))
+        }
         val remoteId = entity.remoteId
             ?: return Result.failure(Exception(semRemoteIdMessage(entity)))
 
@@ -227,29 +254,35 @@ class MedicationRepository(
 
     /**
      * DELETE /api/meds/{remoteId}. Apaga também histórico e horários no backend (cascade).
-     * Só remove do Room depois que a API confirmar. Se o medicamento nunca foi enviado
+     * Só remove do Room depois que a API confirmar. As doses JÁ REGISTRADAS no histórico local
+     * são preservadas e marcadas como "medicamento excluído" (deleteKeepingHistory).
+     * Se o medicamento nunca foi enviado
      * (criado offline), remove só localmente. 404 = já não existe no servidor: remove local também.
      */
     suspend fun deleteMedication(localId: Long): Result<Unit> {
+        val session = sessionForWrite().getOrElse { return Result.failure(it) }
         val entity = dao.getById(localId) ?: return Result.success(Unit)
+        if (entity.userId != session.userId) {
+            return Result.failure(Exception("Este medicamento não pertence à conta atual."))
+        }
         val remoteId = entity.remoteId
 
         if (remoteId == null) {
             if (entity.isSynced) return Result.failure(Exception(semRemoteIdMessage(entity)))
-            dao.deleteById(localId)
+            dao.deleteKeepingHistory(localId)
             return Result.success(Unit)
         }
 
         return try {
             api.deleteMedicamento(remoteId).close()
-            dao.deleteById(localId)
+            dao.deleteKeepingHistory(localId)
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: HttpException) {
             if (e.code() == 404) {
-                Log.w(TAG, "DELETE /api/meds/$remoteId -> 404; removendo também do Room")
-                dao.deleteById(localId)
+                AppLog.w(TAG, "DELETE /api/meds/$remoteId -> 404; removendo também do Room")
+                dao.deleteKeepingHistory(localId)
                 Result.success(Unit)
             } else {
                 falha(e, "DELETE /api/meds/$remoteId", null)
@@ -271,9 +304,14 @@ class MedicationRepository(
      *   WorkManager tentar de novo); erros HTTP de um item não impedem os demais.
      */
     suspend fun syncPending(): Result<Unit> {
-        val userId = userPrefs.userId.first()
+        val session = userPrefs.session.first()
+        if (!AccessPolicy.canModifyMedications(session.tipo)) {
+            AppLog.w(TAG, "syncPending em sessão de cuidador: nada a enviar")
+            return Result.success(Unit)
+        }
+        val userId = session.userId
         if (userId == null || userId <= 0) {
-            Log.w(TAG, "syncPending sem sessão: nada a sincronizar")
+            AppLog.w(TAG, "syncPending sem sessão: nada a sincronizar")
             return Result.success(Unit)
         }
 
@@ -358,7 +396,7 @@ class MedicationRepository(
                 frequencia = frequencia
             )
             if (existente != null) {
-                Log.w(TAG, "Pendente idêntico já existe (id local=${existente.id}); reaproveitando")
+                AppLog.w(TAG, "Pendente idêntico já existe (id local=${existente.id}); reaproveitando")
                 return existente.id
             }
         }
@@ -422,7 +460,7 @@ class MedicationRepository(
         }
         is IOException -> Result.failure(Exception("Sem conexão com a internet. Tente novamente."))
         else -> {
-            Log.e(TAG, "Erro inesperado em $rota", e)
+            AppLog.e(TAG, "Erro inesperado em $rota", e)
             Result.failure(Exception("Não foi possível concluir a operação. Tente novamente."))
         }
     }
@@ -438,7 +476,7 @@ class MedicationRepository(
         } catch (_: Exception) {
             null
         }
-        Log.e(TAG, "$rota -> HTTP ${e.code()} | errorBody=$errorBody | enviado=${Gson().toJson(sent)}")
+        AppLog.e(TAG, "$rota -> HTTP ${e.code()} | errorBody=$errorBody | enviado=${Gson().toJson(sent)}")
         return errorBody
     }
 
@@ -462,46 +500,4 @@ class MedicationRepository(
         in 500..599 -> "Erro no servidor ($code). Tente novamente em instantes."
         else -> "Erro no servidor ($code). Tente novamente em instantes."
     }
-}
-
-// ---------------------------------------------------------------------------
-// Aplica no Room as mesmas mudanças que a API acabou de confirmar
-// ---------------------------------------------------------------------------
-
-private fun Map<String, Any?>.int(key: String): Int? = (this[key] as? Number)?.toInt()
-
-/** Aceita Int, Long ou Double no mapa (ex.: "dosagem" = 2.5); preserva os decimais. */
-private fun Map<String, Any?>.double(key: String): Double? = (this[key] as? Number)?.toDouble()
-
-/**
- * Data nova vem da API como "yyyy-MM-ddT00:00:00.000Z". Se o registro local guarda a hora da
- * primeira dose ("yyyy-MM-dd HH:mm:ss-03:00"), troca só o dia e mantém a hora.
- */
-private fun mergeDate(localAtual: String?, novoIso: String): String {
-    val dia = novoIso.take(10)
-    val sufixo = localAtual?.takeIf { it.length > 10 && it[10] == ' ' }?.substring(10)
-    return if (sufixo != null) dia + sufixo else novoIso
-}
-
-private fun MedicationEntity.applyChanges(c: Map<String, Any?>): MedicationEntity {
-    var e = this
-    (c["nome"] as? String)?.let { e = e.copy(nome = it) }
-    c.double("dosagem")?.let { e = e.copy(dosagemValor = it) }
-    (c["unidade_dosagem"] as? String)?.let { e = e.copy(unidadeDosagem = it) }
-    if (c.containsKey("dosagem") || c.containsKey("unidade_dosagem")) {
-        val v = e.dosagemValor
-        val u = e.unidadeDosagem
-        if (v != null && u != null) e = e.copy(dosagem = "${v.formatarNumero()} $u")
-    }
-    c.int("quantidade_por_dose")?.let { e = e.copy(quantidade = it) }
-    (c["unidade_quantidade"] as? String)?.let { e = e.copy(unidadeQuantidade = it) }
-    c.int("frequencia")?.let { e = e.copy(frequencia = it) }
-    (c["data_inicio"] as? String)?.let { e = e.copy(dataInicio = mergeDate(e.dataInicio, it)) }
-    (c["data_fim"] as? String)?.let { e = e.copy(dataFim = mergeDate(e.dataFim, it)) }
-    (c["horario_dose"] as? String)?.let { e = e.copy(horarioDose = HorarioDose.normalizar(it) ?: it) }
-    if (c.containsKey("estoque")) e = e.copy(estoque = c.int("estoque"))
-    c.int("estoque_minimo")?.let { e = e.copy(estoqueMinimo = it) }
-    if (c.containsKey("observacoes")) e = e.copy(observacoes = c["observacoes"] as? String)
-    (c["ativo"] as? Boolean)?.let { e = e.copy(ativo = it) }
-    return e
 }

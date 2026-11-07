@@ -1,6 +1,7 @@
 package com.andre.medalert.data.remote
 
-import android.util.Log
+import com.andre.medalert.BuildConfig
+import com.andre.medalert.util.AppLog
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -49,14 +50,13 @@ object RetrofitClient {
         response
     }
 
-    // Mostra no Logcat (filtre por "OkHttp") a URL, o body, o código e o JSON recebido.
-    // O token (resposta do login) e a senha (corpo do login/cadastro) saem mascarados.
-    // Antes de entregar o app, troque o level por NONE.
-    private val SEGREDOS = Regex("(\"(?:token|senha)\"\\s*:\\s*\")[^\"]*(\")")
-
+    // Log de rede SÓ em build de debug (BuildConfig.DEBUG). Em release o interceptor nem é
+    // adicionado, então nada de URL, corpo, token ou medicamento chega ao Logcat.
+    // Mesmo em debug, token, senha, e-mail, nome, telefone e observações saem mascarados
+    // (LogRedactor), e o cabeçalho Authorization também.
     private val loggingInterceptor = HttpLoggingInterceptor(object : HttpLoggingInterceptor.Logger {
         override fun log(message: String) {
-            Log.d("OkHttp", SEGREDOS.replace(message, "\$1***\$2"))
+            AppLog.d("OkHttp", message)
         }
     }).apply {
         level = HttpLoggingInterceptor.Level.BODY
@@ -66,7 +66,7 @@ object RetrofitClient {
     private val okHttpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .addInterceptor(authInterceptor)
-            .addInterceptor(loggingInterceptor)
+            .apply { if (BuildConfig.DEBUG) addInterceptor(loggingInterceptor) }
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .writeTimeout(15, TimeUnit.SECONDS)

@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 /**
  * Observa o Room durante a vida do processo e mantém os alarmes sincronizados:
  * cadastro, edição, exclusão, refresh da API, logout e sessão expirada passam todos por aqui.
+ * Sessão de cuidador não mexe nos alarmes (ver SessionMedications.observeForAlarms).
  */
 class MedAlertApplication : Application() {
 
@@ -22,7 +23,7 @@ class MedAlertApplication : Application() {
         NotificationHelper.createNotificationChannel(this)
 
         appScope.launch {
-            SessionMedications.observe(this@MedAlertApplication, patientOnly = true)
+            SessionMedications.observeForAlarms(this@MedAlertApplication)
                 .collect { medications ->
                     MedicationReminderManager.apply(this@MedAlertApplication, medications)
                 }

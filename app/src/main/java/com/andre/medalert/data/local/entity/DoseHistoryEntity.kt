@@ -1,5 +1,6 @@
 package com.andre.medalert.data.local.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -21,6 +22,10 @@ import androidx.room.PrimaryKey
  * distinto no índice único, então elas não colidem).
  *
  * isSynced = false: dose registrada localmente que ainda não foi enviada à API.
+ *
+ * medicamentoRemovido: o medicamento foi excluído depois da dose. O REGISTRO É PRESERVADO (nome e
+ * dosagem ficam gravados aqui) e só ganha esta marca. Linhas marcadas NÃO devem ser enviadas à
+ * API: o medicamento remoto já não existe (o backend apaga o histórico em cascata).
  */
 @Entity(
     tableName = "dose_history",
@@ -42,5 +47,7 @@ data class DoseHistoryEntity(
     val medicationLocalId: Long? = null,
     val previstoEm: Long? = null,
     val tomadoEm: Long? = null,
-    val dia: String? = null
+    val dia: String? = null,
+    @ColumnInfo(defaultValue = "0")
+    val medicamentoRemovido: Boolean = false
 )

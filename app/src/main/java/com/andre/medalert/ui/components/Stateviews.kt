@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -180,4 +181,20 @@ fun EmptyState(
             }
         }
     }
+}
+
+/**
+ * Cuidador logado que ainda não tem paciente vinculado. O app não cria convites nem vínculos:
+ * o vínculo vem do aceite do paciente, então a tela só explica a situação (sem ação indevida).
+ */
+@Composable
+fun CaregiverAwaitingLinkState(modifier: Modifier = Modifier) {
+    EmptyState(
+        icon = Icons.Filled.Link,
+        title = "Aguardando vínculo com o paciente",
+        message = "Sua conta de cuidador ainda não está vinculada a nenhum paciente. " +
+                "Quando o paciente aceitar o vínculo, os medicamentos e o acompanhamento dele " +
+                "aparecem aqui, somente para consulta.",
+        modifier = modifier
+    )
 }

@@ -47,7 +47,8 @@ fun DoseHistoryEntity.toHistoryUiModel(): HistoryUiModel =
         dosage = dosagem,
         scheduledTime = horario,
         takenAt = tomado,
-        status = status.toHistoryDoseStatus()
+        status = status.toHistoryDoseStatus(),
+        medicationRemoved = medicamentoRemovido
     )
 
 /** "tomado" | "atrasado" | "não tomado" | "pendente" (valores literais da API). */

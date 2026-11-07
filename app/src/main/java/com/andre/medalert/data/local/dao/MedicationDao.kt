@@ -192,6 +192,27 @@ abstract class MedicationDao {
         id: Long
     )
 
+    /** Marca como "medicamento excluído" o histórico local das doses desse medicamento. */
+    @Query(
+        "UPDATE dose_history SET medicamentoRemovido = 1 WHERE medicationLocalId IN (:localIds)"
+    )
+    abstract suspend fun markHistoryRemoved(
+        localIds: List<Long>
+    )
+
+    /**
+     * Exclui o medicamento PRESERVANDO o histórico de doses: as linhas de dose_history ficam
+     * (com nome e dosagem gravados) e só ganham a marca medicamentoRemovido. Tudo na mesma
+     * transação: ou o medicamento some e o histórico é marcado, ou nada muda.
+     */
+    @Transaction
+    open suspend fun deleteKeepingHistory(
+        localId: Long
+    ) {
+        markHistoryRemoved(listOf(localId))
+        deleteById(localId)
+    }
+
     @Query(
         "DELETE FROM medications WHERE id IN (:ids)"
     )
@@ -248,6 +269,8 @@ abstract class MedicationDao {
             .filter { it !in keepIds }
 
         if (toDelete.isNotEmpty()) {
+            // Sumiu da API (excluído em outro aparelho, por exemplo): o histórico local fica.
+            markHistoryRemoved(toDelete)
             deleteByIds(toDelete)
         }
 

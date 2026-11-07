@@ -24,6 +24,8 @@ import com.andre.medalert.ui.theme.MedAlertBackground
 import com.andre.medalert.ui.theme.MedAlertCard
 import com.andre.medalert.ui.theme.MedAlertPrimary
 import com.andre.medalert.ui.theme.MedAlertTextSecondary
+import androidx.compose.ui.platform.LocalContext
+import com.andre.medalert.viewmodel.ProfileViewModelFactory
 import com.andre.medalert.viewmodel.ProfileViewModel
 
 // Mesma abordagem do SettingsScreen: cor fixa para tema escuro atual,
@@ -43,7 +45,11 @@ fun ProfileScreen(
     onChangePasswordClick: () -> Unit = {},
     onForgotPasswordClick: () -> Unit = {},
     onLogoutClick: () -> Unit = {},
-    viewModel: ProfileViewModel = viewModel()
+    viewModel: ProfileViewModel = viewModel(
+        factory = ProfileViewModelFactory(
+            LocalContext.current.applicationContext
+        )
+    )
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
@@ -122,12 +128,14 @@ fun ProfileScreen(
             ProfileSectionTitle("Dados pessoais")
 
             ProfileInfoCard {
-                ProfileInfoRow(label = "Nome", value = uiState.nome)
-                ProfileInfoRow(label = "Email", value = uiState.email)
                 ProfileInfoRow(
-                    label = "Idade do paciente",
-                    // TODO: Campo aguardando definição do contrato da API (exibido, não enviado)
-                    value = uiState.idade?.let { "$it anos" } ?: "-",
+                    label = "Nome",
+                    value = uiState.nome
+                )
+
+                ProfileInfoRow(
+                    label = "Email",
+                    value = uiState.email,
                     showDivider = false
                 )
             }
@@ -149,9 +157,7 @@ fun ProfileScreen(
 
             ProfileNavigationRow(
                 icon = Icons.Default.Logout,
-                label = "Sair da conta",
-                onClick = {
-                    viewModel.onLogout()
+                label = "Sair da conta",onClick = {
                     onLogoutClick()
                 },
                 tint = Color(0xFFE05B5B)

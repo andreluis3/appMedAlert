@@ -28,6 +28,11 @@ object NotificationHelper {
     private const val CHANNEL_NAME = "Lembretes do MedAlert"
     const val NOTIFICATION_ID_BASE = 5000
 
+    // Aviso de estoque baixo: canal próprio (importância normal, sem som de alarme).
+    const val STOCK_CHANNEL_ID = "medalert_stock_channel"
+    private const val STOCK_CHANNEL_NAME = "Estoque de medicamentos"
+    private const val STOCK_NOTIFICATION_ID_BASE = 7_000_000
+
     const val EXTRA_NOTIFICATION_ID = "extra_notification_id"
     const val EXTRA_LOCAL_ID = "extra_local_id"
     const val EXTRA_SCHEDULED_AT = "extra_scheduled_at"
@@ -64,8 +69,71 @@ object NotificationHelper {
                 setSound(soundUri, audioAttributes)
             }
 
-            context.getSystemService(NotificationManager::class.java)
-                .createNotificationChannel(channel)
+            val manager = context.getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(channel)
+
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    STOCK_CHANNEL_ID,
+                    STOCK_CHANNEL_NAME,
+                    NotificationManager.IMPORTANCE_DEFAULT
+                ).apply {
+                    description = "Avisa quando o estoque de um medicamento está acabando"
+                }
+            )
+        }
+    }
+
+    /** Um ID por medicamento: o aviso de estoque substitui o anterior do mesmo remédio. */
+    fun stockNotificationIdFor(localId: Long): Int =
+        STOCK_NOTIFICATION_ID_BASE + (localId % 1_000_000L).toInt()
+
+    /**
+     * Aviso de estoque baixo/esgotado. Toque abre o app. Não faz nada se as notificações
+     * estiverem desligadas.
+     */
+    @SuppressLint("MissingPermission")
+    fun showLowStockNotification(
+        context: Context,
+        localId: Long,
+        medicationName: String,
+        remaining: Int
+    ) {
+        val manager = NotificationManagerCompat.from(context)
+        if (!manager.areNotificationsEnabled()) return
+
+        val notificationId = stockNotificationIdFor(localId)
+        val title = if (remaining <= 0) "Estoque esgotado" else "Estoque baixo"
+        val text = if (remaining <= 0) {
+            "Acabou o estoque de $medicationName. Reponha antes da próxima dose."
+        } else {
+            "Restam $remaining de $medicationName. Reponha em breve."
+        }
+
+        val openApp = PendingIntent.getActivity(
+            context,
+            notificationId,
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(context, STOCK_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_medalert)
+            .setColor(COLOR_ACCENT)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setContentIntent(openApp)
+            .setAutoCancel(true)
+
+        try {
+            manager.notify(notificationId, builder.build())
+        } catch (_: SecurityException) {
+            // Permissão revogada no meio do caminho.
         }
     }
 

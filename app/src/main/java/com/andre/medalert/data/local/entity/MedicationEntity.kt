@@ -14,6 +14,11 @@ import androidx.room.PrimaryKey
  * - dataInicio/dataFim armazenam as datas do tratamento.
  * - horarioDose armazena o horário inicial da primeira dose, SEMPRE em "HH:mm".
  * - horarios armazena a lista de horários retornada/calculada pelo backend.
+ * - estoque é a BASE conhecida (servidor ou última edição do usuário); estoqueConsumido são as
+ *   unidades descontadas LOCALMENTE por doses tomadas desde essa base. O estoque exibido é
+ *   [estoqueAtual]. Assim um refresh da API não "devolve" o estoque já consumido no aparelho.
+ * - acompanhadoDesde (epoch millis) é quando o aparelho passou a conhecer o medicamento; a adesão
+ *   offline só conta doses a partir desse momento (sem cobrar doses de antes do uso do app).
  */
 @Entity(
     tableName = "medications",
@@ -50,8 +55,17 @@ data class MedicationEntity(
     val observacoes: String? = null,
 
     @ColumnInfo(defaultValue = "1")
-    val ativo: Boolean = true
+    val ativo: Boolean = true,
+
+    @ColumnInfo(defaultValue = "0")
+    val estoqueConsumido: Int = 0,
+
+    val acompanhadoDesde: Long? = null
 )
+
+/** Estoque que o usuário realmente tem: base menos o consumo local (nunca negativo). */
+val MedicationEntity.estoqueAtual: Int?
+    get() = estoque?.let { (it - estoqueConsumido).coerceAtLeast(0) }
 
 /**
  * Converte a coluna de horários em uma lista.
@@ -98,10 +112,23 @@ private fun mantemHoraLocal(
  * O horarioDose da API já chega normalizado ("HH:mm") ou null (aí vale o do aparelho).
  */
 fun MedicationEntity.preservingDetailsFrom(
-    previous: MedicationEntity?
+    previous: MedicationEntity?,
+    nowMillis: Long = System.currentTimeMillis()
 ): MedicationEntity {
 
-    if (previous == null) return this
+    // Medicamento novo neste aparelho: o acompanhamento da adesão começa agora.
+    if (previous == null) return copy(acompanhadoDesde = acompanhadoDesde ?: nowMillis)
+
+    // Se o servidor mandou um estoque DIFERENTE do que o aparelho tinha como base, o servidor
+    // mudou a base (edição em outro aparelho, por exemplo): o consumo local deixa de valer.
+    // Se o estoque é o mesmo (ou não veio), o consumo local continua descontando.
+    val consumoLocal =
+        if (estoque != null && previous.estoque != null && estoque != previous.estoque) {
+            0
+        } else {
+            previous.estoqueConsumido
+        }
+    val desde = previous.acompanhadoDesde ?: acompanhadoDesde ?: nowMillis
 
     val dosagemConfere =
         previous.dosagemValor != null &&
@@ -112,6 +139,8 @@ fun MedicationEntity.preservingDetailsFrom(
     if (frequencia != null) {
         return copy(
             id = previous.id,
+            estoqueConsumido = consumoLocal,
+            acompanhadoDesde = desde,
 
             horarios = horarios.ifBlank { previous.horarios },
             horarioDose = horarioDose ?: previous.horarioDose,
@@ -143,6 +172,8 @@ fun MedicationEntity.preservingDetailsFrom(
     // Resposta resumida da API.
     return copy(
         id = previous.id,
+        estoqueConsumido = consumoLocal,
+        acompanhadoDesde = desde,
 
         dataInicio = previous.dataInicio,
         dataFim = previous.dataFim,
