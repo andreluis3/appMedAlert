@@ -13,7 +13,7 @@ import com.andre.medalert.data.schedule.HistoryRange
 import com.andre.medalert.data.schedule.SessionMedications
 import com.andre.medalert.data.schedule.toUiModel
 import com.andre.medalert.data.session.AccessPolicy
-import com.andre.medalert.sync.HistorySyncWorker
+import com.andre.medalert.sync.MedicationSyncWorker
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -72,7 +72,9 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
 
             val session = UserPreferencesRepository(getApplication<Application>()).session.first()
             val patientId = AccessPolicy.patientIdFor(session.tipo, session.userId, session.pacienteId)
-            if (patientId == null) {
+            if (patientId == null ||
+                !AccessPolicy.canViewHistory(session.tipo, session.userId, session.pacienteId)
+            ) {
                 _uiState.value =
                     if (AccessPolicy.isAwaitingLink(session.tipo, session.userId, session.pacienteId)) {
                         HistoryUiState.AwaitingLink
@@ -82,10 +84,11 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
                 return@launch
             }
 
-            // Só paciente envia doses pendentes (cuidador é somente leitura).
-            if (AccessPolicy.canModifyMedications(session.tipo)) {
+            // Paciente e cuidador enviam as doses pendentes do paciente (medicamentos pendentes
+            // sobem antes, na mesma sincronização).
+            if (AccessPolicy.canRegisterDose(session.tipo, session.userId, session.pacienteId)) {
                 try {
-                    HistorySyncWorker.enqueue(getApplication<Application>())
+                    MedicationSyncWorker.enqueue(getApplication<Application>())
                 } catch (_: Exception) {
                     // O envio será tentado de novo na próxima abertura do app.
                 }

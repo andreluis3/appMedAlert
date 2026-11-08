@@ -23,9 +23,13 @@ sealed interface AlarmTarget {
  * Regras de acesso paciente x cuidador, num lugar só e sem dependência de Android
  * (por isso é testável em JVM).
  *
- * - Paciente: lê e altera os PRÓPRIOS medicamentos.
- * - Cuidador: só LÊ os medicamentos do paciente vinculado (pacienteId). Nunca grava.
+ * - Paciente: lê e altera os PRÓPRIOS medicamentos e registra as próprias administrações.
+ * - Cuidador: lê os medicamentos e o histórico do paciente vinculado (pacienteId) e REGISTRA
+ *   administrações dele, mas nunca cadastra, edita ou exclui medicamentos.
  * - Sessões antigas sem tipo são tratadas como paciente.
+ *
+ * Esta política só decide o que a INTERFACE e a camada de dados do Android oferecem. A segurança
+ * real (token + vínculo cuidador/paciente) precisa ser validada pela API em cada rota.
  */
 object AccessPolicy {
 
@@ -35,8 +39,29 @@ object AccessPolicy {
     fun isCaregiver(tipo: String?): Boolean =
         tipo?.trim().equals(TIPO_CUIDADOR, ignoreCase = true)
 
-    /** Criar, editar e excluir medicamentos (e enviar pendentes) só vale para paciente. */
-    fun canModifyMedications(tipo: String?): Boolean = !isCaregiver(tipo)
+    /** Cadastrar medicamento (e enviar os cadastros pendentes): só paciente. */
+    fun canCreateMedication(tipo: String?): Boolean = !isCaregiver(tipo)
+
+    /** Editar medicamento: só paciente. */
+    fun canEditMedication(tipo: String?): Boolean = !isCaregiver(tipo)
+
+    /** Excluir medicamento: só paciente. */
+    fun canDeleteMedication(tipo: String?): Boolean = !isCaregiver(tipo)
+
+    /**
+     * Registrar administração de dose: paciente (a própria) e cuidador (do paciente vinculado).
+     * Exige haver um paciente-alvo: cuidador sem vínculo e sessão vazia não registram nada.
+     */
+    fun canRegisterDose(tipo: String?, userId: Int?, pacienteId: Int?): Boolean =
+        patientIdFor(tipo, userId, pacienteId) != null
+
+    /** Consultar o histórico de administrações: paciente (o próprio) e cuidador vinculado. */
+    fun canViewHistory(tipo: String?, userId: Int?, pacienteId: Int?): Boolean =
+        patientIdFor(tipo, userId, pacienteId) != null
+
+    /** Cuidador com paciente vinculado (único caso em que alertas do paciente fazem sentido). */
+    fun canViewLinkedPatient(tipo: String?, pacienteId: Int?): Boolean =
+        isCaregiver(tipo) && (pacienteId ?: 0) > 0
 
     /**
      * De quem são os dados mostrados: paciente = ele mesmo; cuidador = o paciente vinculado.

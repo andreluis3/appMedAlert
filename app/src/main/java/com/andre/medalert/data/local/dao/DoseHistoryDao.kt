@@ -6,6 +6,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import com.andre.medalert.data.local.entity.DoseHistoryEntity
+import com.andre.medalert.data.local.entity.MedicationEntity
 import kotlinx.coroutines.flow.Flow
 
 /** Estoque do medicamento como está no Room (base, mínimo e consumo local). */
@@ -49,7 +50,7 @@ abstract class DoseHistoryDao {
         SELECT * FROM dose_history
         WHERE userId = :userId
           AND medicationLocalId IS NOT NULL
-          AND status = 'tomado'
+          AND (status = 'tomado' OR tomadoEm IS NOT NULL)
           AND previstoEm >= :fromMillis
         """
     )
@@ -62,6 +63,29 @@ abstract class DoseHistoryDao {
         """
     )
     abstract suspend fun countByDose(medicationLocalId: Long, previstoEm: Long): Int
+
+    /**
+     * Identidade da dose entre aparelhos: medicamento REMOTO + horário previsto.
+     * Complementa o índice único local (medicationLocalId, previstoEm), que só vale neste aparelho.
+     */
+    @Query(
+        """
+        SELECT COUNT(*) FROM dose_history
+        WHERE medicamentoId = :medicamentoId AND previstoEm = :previstoEm
+        """
+    )
+    abstract suspend fun countByRemoteDose(medicamentoId: Int, previstoEm: Long): Int
+
+    /** Medicamentos do paciente no Room (o reconciliador do dia precisa deles para associar nomes). */
+    @Query("SELECT * FROM medications WHERE userId = :userId")
+    abstract suspend fun medicationsOf(userId: Int): List<MedicationEntity>
+
+    /**
+     * Limpa o cache do paciente neste aparelho (logout do cuidador). Só remove o que já está no
+     * servidor (isSynced = 1): administrações pendentes de envio NUNCA são apagadas.
+     */
+    @Query("DELETE FROM dose_history WHERE userId = :userId AND isSynced = 1")
+    abstract suspend fun deleteSyncedByUser(userId: Int): Int
 
     /** Pendentes de envio. Doses de medicamento excluído ficam de fora (o remoto já não existe). */
     @Query("SELECT * FROM dose_history WHERE isSynced = 0 AND medicamentoRemovido = 0")
@@ -129,6 +153,16 @@ abstract class DoseHistoryDao {
         entity: DoseHistoryEntity,
         quantity: Int
     ): TakenInsertResult {
+        // Mesma dose já conhecida pelo ID REMOTO (ex.: veio do servidor, registrada por outro
+        // aparelho): não duplica e não desconta estoque de novo.
+        val remoteMedicationId = entity.medicamentoId
+        val scheduledAt = entity.previstoEm
+        if (remoteMedicationId != null && scheduledAt != null &&
+            countByRemoteDose(remoteMedicationId, scheduledAt) > 0
+        ) {
+            return TakenInsertResult(inserted = false)
+        }
+
         if (insertIgnore(entity) == -1L) return TakenInsertResult(inserted = false)
 
         val medicationId = entity.medicationLocalId

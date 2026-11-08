@@ -397,6 +397,10 @@ private fun HistoryRecordRow(record: HistoryUiModel) {
                     append(" • às ")
                     append(record.takenAt)
                 }
+                when (record.registeredBy) {
+                    "cuidador" -> append(" • pelo cuidador")
+                    "paciente" -> append(" • pelo paciente")
+                }
             }
             Text(subtitle, color = MedAlertTextSecondary, fontSize = 12.sp)
         }

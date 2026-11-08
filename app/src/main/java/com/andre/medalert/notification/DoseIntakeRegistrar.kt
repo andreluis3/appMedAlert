@@ -2,11 +2,14 @@ package com.andre.medalert.notification
 
 import android.content.Context
 import com.andre.medalert.data.local.AppDatabase
+import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.schedule.StockRules
+import com.andre.medalert.data.session.AccessPolicy
 import com.andre.medalert.data.repository.HistoryRepository
 import com.andre.medalert.sync.HistorySyncWorker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
 enum class DoseRegisterResult {
@@ -16,7 +19,7 @@ enum class DoseRegisterResult {
     /** Essa dose já estava registrada (toque duplo, notificação repetida). Nada foi duplicado. */
     ALREADY_REGISTERED,
 
-    /** Medicamento excluído, inativo ou de outro usuário: não há o que registrar. */
+    /** Medicamento excluído, inativo, de outro paciente, ou sessão sem permissão: não há o que registrar. */
     MEDICATION_UNAVAILABLE,
 
     /** Falha inesperada ao gravar. */
@@ -24,9 +27,11 @@ enum class DoseRegisterResult {
 }
 
 /**
- * Ponto único para registrar uma dose como tomada a partir da notificação.
+ * Ponto único para registrar uma dose como tomada: pela notificação (paciente) ou pela Home
+ * (paciente ou cuidador do paciente vinculado).
  *
  * Funciona com o app fechado: lê o medicamento e grava no Room direto, sem depender de tela.
+ * Cada registro guarda a origem ("paciente" ou "cuidador"), quem registrou e um clientEventId.
  * Também desconta o estoque (quantidade por dose) e avisa se ficou baixo/esgotado.
  * A dose é identificada por (medicamento local, horário previsto).
  *
@@ -44,8 +49,25 @@ object DoseIntakeRegistrar {
     ): DoseRegisterResult = withContext(Dispatchers.IO) {
         val app = context.applicationContext
         try {
-            val med = MedicationReminderManager.findDeliverable(app, medicationLocalId)
+            val session = UserPreferencesRepository(app).session.first()
+            val patientId = AccessPolicy.patientIdFor(session.tipo, session.userId, session.pacienteId)
+            if (patientId == null ||
+                !AccessPolicy.canRegisterDose(session.tipo, session.userId, session.pacienteId)
+            ) {
+                return@withContext DoseRegisterResult.MEDICATION_UNAVAILABLE
+            }
+
+            // Medicamento do PACIENTE-ALVO: o do próprio paciente ou o do paciente vinculado ao
+            // cuidador. O Room tem uma única cópia por medicamento remoto (nada de duplicata).
+            val med = AppDatabase.getInstance(app).medicationDao().getById(medicationLocalId)
+                ?.takeIf { it.ativo && it.userId == patientId }
                 ?: return@withContext DoseRegisterResult.MEDICATION_UNAVAILABLE
+
+            val origin = if (AccessPolicy.isCaregiver(session.tipo)) {
+                AccessPolicy.TIPO_CUIDADOR
+            } else {
+                AccessPolicy.TIPO_PACIENTE
+            }
 
             val repository = HistoryRepository(AppDatabase.getInstance(app).doseHistoryDao())
             val result = repository.registerTakenLocally(
@@ -57,7 +79,9 @@ object DoseIntakeRegistrar {
                 scheduledAtMillis = scheduledAtMillis,
                 takenAtMillis = takenAtMillis,
                 // Quantidade por dose do cadastro; sem informação, 1 unidade por dose.
-                quantityPerDose = med.quantidade ?: 1
+                quantityPerDose = med.quantidade ?: 1,
+                origin = origin,
+                registeredById = session.userId
             )
 
             if (!result.inserted) return@withContext DoseRegisterResult.ALREADY_REGISTERED

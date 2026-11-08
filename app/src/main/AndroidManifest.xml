@@ -11,6 +11,14 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!--  FCM: sinaliza eventos entre paciente e cuidador e renova o token.  -->
+        <service android:name=".fcm.MedAlertMessagingService" android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT"/>
+            </intent-filter>
+        </service>
+        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="medalert_remote_events_channel"/>
+        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/ic_stat_medalert"/>
         <receiver android:name=".notification.MedicationAlarmReceiver" android:exported="false"/>
         <receiver android:name=".notification.DismissAlarmReceiver" android:exported="false"/>
         <receiver android:name=".notification.BootReceiver" android:exported="true">

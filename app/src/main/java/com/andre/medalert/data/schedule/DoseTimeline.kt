@@ -29,7 +29,9 @@ data class DoseEvent(
     val scheduledAt: LocalDateTime,
     val takenAt: LocalDateTime?,
     val status: HistoryDoseStatus,
-    val medicationRemoved: Boolean = false
+    val medicationRemoved: Boolean = false,
+    /** Quem registrou a administração: "paciente", "cuidador" ou null (desconhecido). */
+    val registeredBy: String? = null
 )
 
 /** Única fonte das regras de status. Histórico e Calendário usam esta mesma função. */
@@ -211,7 +213,8 @@ object DoseTimelineBuilder {
             scheduledAt = scheduledAt,
             takenAt = record.takenAt,
             status = status,
-            medicationRemoved = record.entity.medicamentoRemovido
+            medicationRemoved = record.entity.medicamentoRemovido,
+            registeredBy = record.entity.origem
         )
     }
 }
@@ -263,5 +266,6 @@ fun DoseEvent.toUiModel(): HistoryUiModel =
         takenAt = takenAt?.let { TIME_FORMAT.format(it) },
         status = status,
         medicationRemoved = medicationRemoved,
-        date = scheduledAt.toLocalDate()
+        date = scheduledAt.toLocalDate(),
+        registeredBy = registeredBy
     )

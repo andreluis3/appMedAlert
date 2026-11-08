@@ -38,8 +38,9 @@ private val cadastroMutex = Mutex()
 private val envioMutex = Mutex()
 
 /**
- * Cuidador tem acesso SOMENTE LEITURA. Este bloqueio fica na camada de dados (e não só nos
- * botões da tela) para que nenhum caminho de código grave medicamentos como cuidador.
+ * Cuidador não cadastra, edita nem exclui medicamentos (só consulta e registra administrações).
+ * Este bloqueio fica na camada de dados (e não só nos botões da tela) para que nenhum caminho de
+ * código altere medicamentos como cuidador. A API também deve recusar (403) esses pedidos.
  */
 class CaregiverReadOnlyException :
     Exception("Cuidadores só podem consultar os medicamentos do paciente. Alterações não são permitidas.")
@@ -130,12 +131,13 @@ class MedicationRepository(
     }
 
     /**
-     * Sessão autorizada a ALTERAR medicamentos: só paciente logado.
+     * Sessão autorizada a executar a operação de escrita descrita por [permission]
+     * (cadastrar, editar ou excluir): só paciente logado.
      * Cuidador recebe [CaregiverReadOnlyException]; sem sessão, "sessão expirada".
      */
-    private suspend fun sessionForWrite(): Result<SessionInfo> {
+    private suspend fun sessionForWrite(permission: (String?) -> Boolean): Result<SessionInfo> {
         val session = userPrefs.session.first()
-        if (!AccessPolicy.canModifyMedications(session.tipo)) {
+        if (!permission(session.tipo)) {
             return Result.failure(CaregiverReadOnlyException())
         }
         val userId = session.userId
@@ -162,7 +164,8 @@ class MedicationRepository(
      * - outros erros HTTP / inesperados: devolve erro, mas o registro continua no Room.
      */
     suspend fun saveMedicationForCurrentUser(draft: MedicamentoData): Result<SaveOutcome> {
-        val session = sessionForWrite().getOrElse { return Result.failure(it) }
+        val session = sessionForWrite(AccessPolicy::canCreateMedication)
+            .getOrElse { return Result.failure(it) }
         val userId = session.userId ?: return Result.failure(Exception("Sessão expirada. Faça login novamente."))
 
         if (!HorarioDose.ehHoraLocal(draft.horarioDose)) {
@@ -226,7 +229,8 @@ class MedicationRepository(
      * traz da API o que só ela calcula (ex.: horários). Em caso de erro da API, o Room NÃO muda.
      */
     suspend fun editMedication(localId: Long, changes: Map<String, Any?>): Result<Unit> {
-        val session = sessionForWrite().getOrElse { return Result.failure(it) }
+        val session = sessionForWrite(AccessPolicy::canEditMedication)
+            .getOrElse { return Result.failure(it) }
         if (changes.isEmpty()) return Result.success(Unit)
         val entity = dao.getById(localId)
             ?: return Result.failure(Exception("Medicamento não encontrado."))
@@ -260,7 +264,8 @@ class MedicationRepository(
      * (criado offline), remove só localmente. 404 = já não existe no servidor: remove local também.
      */
     suspend fun deleteMedication(localId: Long): Result<Unit> {
-        val session = sessionForWrite().getOrElse { return Result.failure(it) }
+        val session = sessionForWrite(AccessPolicy::canDeleteMedication)
+            .getOrElse { return Result.failure(it) }
         val entity = dao.getById(localId) ?: return Result.success(Unit)
         if (entity.userId != session.userId) {
             return Result.failure(Exception("Este medicamento não pertence à conta atual."))
@@ -305,7 +310,7 @@ class MedicationRepository(
      */
     suspend fun syncPending(): Result<Unit> {
         val session = userPrefs.session.first()
-        if (!AccessPolicy.canModifyMedications(session.tipo)) {
+        if (!AccessPolicy.canCreateMedication(session.tipo)) {
             AppLog.w(TAG, "syncPending em sessão de cuidador: nada a enviar")
             return Result.success(Unit)
         }

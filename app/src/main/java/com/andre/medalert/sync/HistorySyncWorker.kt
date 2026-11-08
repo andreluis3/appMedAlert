@@ -23,7 +23,8 @@ import java.util.concurrent.TimeUnit
  *
  * - Só roda com internet (constraint) e tenta de novo com backoff exponencial quando a falha é
  *   de rede ou do servidor.
- * - Só paciente envia: cuidador é somente leitura e sem sessão não há de quem sincronizar.
+ * - Paciente envia as próprias doses e cuidador envia as do paciente vinculado; sem sessão (ou
+ *   cuidador sem vínculo) não há de quem sincronizar.
  * - É seguro disparar várias vezes: o repositório usa uma trava e só marca isSynced após 2xx.
  */
 class HistorySyncWorker(
@@ -33,8 +34,9 @@ class HistorySyncWorker(
 
     override suspend fun doWork(): Result {
         val session = UserPreferencesRepository(applicationContext).session.first()
-        if (!AccessPolicy.canModifyMedications(session.tipo)) return Result.success()
-        val userId = session.userId?.takeIf { it > 0 } ?: return Result.success()
+        // Paciente envia as próprias doses; cuidador envia as do paciente vinculado.
+        val userId = AccessPolicy.patientIdFor(session.tipo, session.userId, session.pacienteId)
+            ?: return Result.success()
 
         return try {
             val repository = HistoryRepository(
@@ -44,7 +46,8 @@ class HistorySyncWorker(
             AppLog.d(
                 TAG,
                 "sync: enviadas=${outcome.sent} recusadas=${outcome.rejected} " +
-                        "aguardando=${outcome.waiting} nova tentativa=${outcome.shouldRetry}"
+                        "aguardando=${outcome.waiting} duplicadas=${outcome.duplicates} " +
+                        "nova tentativa=${outcome.shouldRetry}"
             )
             if (outcome.shouldRetry) Result.retry() else Result.success()
         } catch (e: CancellationException) {

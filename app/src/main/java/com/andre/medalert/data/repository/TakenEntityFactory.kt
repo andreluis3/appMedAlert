@@ -11,6 +11,8 @@ private val HORA: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 /**
  * Monta a linha de histórico de uma dose tomada. Função pura (testável em JVM): o dia e os
  * horários vêm do fuso informado, o status é sempre "tomado" e a linha nasce não sincronizada.
+ * [origin] ("paciente" ou "cuidador"), [registeredById] e [clientEventId] identificam quem
+ * registrou e dão ao registro um ID estável gerado no aparelho.
  */
 internal fun buildTakenEntity(
     userId: Int,
@@ -20,7 +22,10 @@ internal fun buildTakenEntity(
     dosage: String,
     scheduledAtMillis: Long,
     takenAtMillis: Long,
-    zone: ZoneId = ZoneId.systemDefault()
+    zone: ZoneId = ZoneId.systemDefault(),
+    origin: String? = null,
+    registeredById: Int? = null,
+    clientEventId: String? = null
 ): DoseHistoryEntity {
     val scheduled = Instant.ofEpochMilli(scheduledAtMillis).atZone(zone)
     val taken = Instant.ofEpochMilli(takenAtMillis).atZone(zone)
@@ -37,6 +42,9 @@ internal fun buildTakenEntity(
         medicationLocalId = medicationLocalId,
         previstoEm = scheduledAtMillis,
         tomadoEm = takenAtMillis,
-        dia = scheduled.toLocalDate().toString()
+        dia = scheduled.toLocalDate().toString(),
+        clientEventId = clientEventId,
+        origem = origin,
+        registradoPorId = registeredById
     )
 }

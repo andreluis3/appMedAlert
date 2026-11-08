@@ -10,13 +10,15 @@ import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.session.AccessPolicy
 
 /**
- * Protege rotas que alteram medicamentos (cadastro e edição). Cuidador é somente leitura:
+ * Protege rotas que alteram medicamentos (cadastro e edição). Cuidador não cadastra nem edita:
  * se chegar aqui (deep link, estado restaurado, bug de navegação), volta na hora.
- * Enquanto a sessão ainda carrega, não mostra nada. O Repository também bloqueia a gravação.
+ * [allowed] diz qual permissão a rota exige (padrão: editar). Enquanto a sessão ainda carrega,
+ * não mostra nada. O Repository também bloqueia a gravação.
  */
 @Composable
 fun BlockForCaregiver(
     onBlocked: () -> Unit,
+    allowed: (String?) -> Boolean = AccessPolicy::canEditMedication,
     content: @Composable () -> Unit
 ) {
     val context = LocalContext.current
@@ -25,7 +27,7 @@ fun BlockForCaregiver(
 
     val current = session ?: return
 
-    if (AccessPolicy.canModifyMedications(current.tipo)) {
+    if (allowed(current.tipo)) {
         content()
     } else {
         LaunchedEffect(Unit) { onBlocked() }

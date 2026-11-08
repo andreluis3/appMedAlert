@@ -27,6 +27,7 @@ import com.andre.medalert.ui.components.BlockForCaregiver
 import com.andre.medalert.data.remote.SessionManager
 import com.andre.medalert.notification.MedicationReminderManager
 import com.andre.medalert.notification.NotificationHelper
+import com.andre.medalert.sync.MedicationSyncWorker
 import com.andre.medalert.ui.screens.adherence.AdherenceScreen
 import com.andre.medalert.ui.screens.cadastro.CadastroScreen
 import com.andre.medalert.ui.screens.calendar.CalendarScreen
@@ -332,7 +333,10 @@ class MainActivity : ComponentActivity() {
                     // Cadastro de medicamento.
                     composable("cadastro_med") {
                         // Cuidador é somente leitura: não cadastra medicamentos.
-                        BlockForCaregiver(onBlocked = { navController.popBackStack() }) {
+                        BlockForCaregiver(
+                            onBlocked = { navController.popBackStack() },
+                            allowed = AccessPolicy::canCreateMedication
+                        ) {
                             CadastroMedScreen(
                                 onSuccess = {
                                     navController.navigate("home") {
@@ -519,9 +523,11 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         resumeTick++
-        // Ao abrir o app: garante que os alarmes batem com o Room.
+        // Ao abrir o app: garante que os alarmes batem com o Room e sincroniza com a API
+        // (sem sessão a sincronização não faz nada; sem internet ela espera a conexão).
         lifecycleScope.launch {
             MedicationReminderManager.rescheduleAll(applicationContext)
         }
+        MedicationSyncWorker.enqueue(applicationContext)
     }
 }

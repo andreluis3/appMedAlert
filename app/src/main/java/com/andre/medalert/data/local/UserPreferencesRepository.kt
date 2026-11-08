@@ -24,6 +24,7 @@ class UserPreferencesRepository(context: Context) {
         val PACIENTE_ID = intPreferencesKey("paciente_id")
         val USER_NAME = stringPreferencesKey("user_name")
         val USER_EMAIL = stringPreferencesKey("user_email")
+        val FCM_REGISTERED = stringPreferencesKey("fcm_registered")
     }
 
     val userId: Flow<Int?> = dataStore.data.map { it[Keys.USER_ID] }
@@ -99,6 +100,13 @@ class UserPreferencesRepository(context: Context) {
                 prefs.remove(Keys.USER_EMAIL)
             }
         }
+    }
+
+    /** "<cuidadorId>:<token>" já enviado à API; evita reenviar o mesmo token. Some no logout (clear). */
+    val fcmRegistered: Flow<String?> = dataStore.data.map { it[Keys.FCM_REGISTERED] }
+
+    suspend fun saveFcmRegistered(marker: String) {
+        dataStore.edit { prefs -> prefs[Keys.FCM_REGISTERED] = marker }
     }
 
     suspend fun clear() {

@@ -12,10 +12,17 @@ import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.schedule.LocalAdherence
 import com.andre.medalert.data.schedule.SessionUser
 import com.andre.medalert.data.session.AccessPolicy
+import com.andre.medalert.notification.DoseIntakeRegistrar
+import com.andre.medalert.notification.DoseRegisterResult
+import com.andre.medalert.notification.NotificationHelper
+import com.andre.medalert.notification.SnoozeStore
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import com.andre.medalert.data.repository.HistoryRepository
 import kotlinx.coroutines.flow.SharingStarted
@@ -34,6 +41,9 @@ import java.time.format.DateTimeFormatter
 
 data class HomeDoseUi(
     val key: String,
+    /** ID LOCAL do medicamento no Room e horário previsto: identificam a dose ao registrar. */
+    val medicationLocalId: Long,
+    val scheduledAtMillis: Long,
     val medicationName: String,
     val dosage: String,
     val time: String,
@@ -65,6 +75,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val historyRepository = HistoryRepository(db.doseHistoryDao())
 
     private val adherence = MutableStateFlow("Sem dados")
+
+    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
+
+    /** Avisos de uma só vez (toast) sobre o resultado de registrar uma dose. */
+    val messages: SharedFlow<String> = _messages.asSharedFlow()
 
     private val ticker = flow {
         while (true) {
@@ -129,6 +144,43 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Registra a dose como tomada: o paciente registra a própria e o cuidador registra a do
+     * paciente vinculado (a origem fica gravada). O envio à API é agendado pelo registrador.
+     * O índice único do Room e a checagem por ID remoto impedem registrar duas vezes.
+     */
+    fun registerDose(dose: HomeDoseUi) {
+        if (dose.isTaken) return
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            val result = DoseIntakeRegistrar.registerTaken(
+                context = app,
+                medicationLocalId = dose.medicationLocalId,
+                scheduledAtMillis = dose.scheduledAtMillis
+            )
+            when (result) {
+                DoseRegisterResult.REGISTERED -> {
+                    // Se o lembrete desta dose ainda está na tela ou adiado, não há mais o que lembrar.
+                    SnoozeStore.cancel(app, dose.medicationLocalId)
+                    NotificationHelper.cancelNotification(
+                        app,
+                        NotificationHelper.notificationIdFor(dose.medicationLocalId)
+                    )
+                    _messages.tryEmit("Dose registrada.")
+                }
+
+                DoseRegisterResult.ALREADY_REGISTERED ->
+                    _messages.tryEmit("Esta dose já estava registrada.")
+
+                DoseRegisterResult.MEDICATION_UNAVAILABLE ->
+                    _messages.tryEmit("Não foi possível registrar: medicamento indisponível.")
+
+                DoseRegisterResult.ERROR ->
+                    _messages.tryEmit("Não foi possível registrar a dose. Tente novamente.")
+            }
+        }
+    }
+
     private fun build(
         name: String?,
         medications: List<MedicationEntity>,
@@ -145,6 +197,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             val scheduledMillis = it.at.atZone(zone).toInstant().toEpochMilli()
             HomeDoseUi(
                 key = "${it.medicationLocalId}-${it.at}",
+                medicationLocalId = it.medicationLocalId,
+                scheduledAtMillis = scheduledMillis,
                 medicationName = it.medicationName,
                 dosage = it.dosage,
                 time = it.at.format(HORA_FORMAT),

@@ -41,7 +41,9 @@ data class HistoryUiModel(
     val status: HistoryDoseStatus,
     /** O medicamento foi excluído depois da dose; o registro da dose foi preservado. */
     val medicationRemoved: Boolean = false,
-    val date: LocalDate? = null
+    val date: LocalDate? = null,
+    /** "paciente", "cuidador" ou null quando a origem do registro não é conhecida. */
+    val registeredBy: String? = null
 )
 
 /**

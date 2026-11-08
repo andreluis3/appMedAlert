@@ -19,6 +19,7 @@ import kotlinx.coroutines.sync.withLock
 import java.io.IOException
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.UUID
 
 private const val TAG = "HistoryRepo"
 
@@ -32,6 +33,7 @@ private val syncMutex = Mutex()
 /**
  * Resultado de um ciclo de envio.
  * [shouldRetry] = true quando vale tentar de novo depois (sem internet, erro 5xx, falha inesperada).
+ * [duplicates] = doses que o servidor disse já ter (409): contam como confirmadas.
  * [rejected] = doses que o servidor recusou com 4xx: continuam pendentes no Room, sem tentativa automática.
  * [waiting] = doses que ainda não podem ser enviadas (medicamento sem ID remoto ou sem horário real).
  */
@@ -39,7 +41,9 @@ data class SyncOutcome(
     val sent: Int,
     val rejected: Int,
     val waiting: Int,
-    val shouldRetry: Boolean
+    val shouldRetry: Boolean,
+    /** Doses que o servidor informou já existirem (HTTP 409): confirmadas sem criar duplicata. */
+    val duplicates: Int = 0
 )
 
 private sealed interface SendResult {
@@ -150,7 +154,9 @@ class HistoryRepository(
         dosage: String,
         scheduledAtMillis: Long,
         takenAtMillis: Long,
-        quantityPerDose: Int = 1
+        quantityPerDose: Int = 1,
+        origin: String? = null,
+        registeredById: Int? = null
     ): TakenInsertResult {
         val entity = buildTakenEntity(
             userId = userId,
@@ -159,7 +165,10 @@ class HistoryRepository(
             medicationName = medicationName,
             dosage = dosage,
             scheduledAtMillis = scheduledAtMillis,
-            takenAtMillis = takenAtMillis
+            takenAtMillis = takenAtMillis,
+            origin = origin,
+            registeredById = registeredById,
+            clientEventId = UUID.randomUUID().toString()
         )
         return dao.insertTakenConsumingStock(entity, quantityPerDose)
     }
@@ -180,15 +189,27 @@ class HistoryRepository(
      *   pelo interceptor); outros 4xx: a dose continua pendente e é contada em [SyncOutcome.rejected].
      * - Doses de medicamento excluído não são enviadas (ficam fora da consulta).
      *
-     * Quem chama deve garantir que a sessão é de paciente (cuidador é somente leitura).
+     * [userId] é sempre o PACIENTE dono das doses: o cuidador também envia, com o id do paciente
+     * vinculado. Quem chama deve conferir AccessPolicy.canRegisterDose.
+     *
+     * Antes de enviar, se há dose pendente de hoje, o doseDia é consultado e reconciliado: uma
+     * dose que o servidor já tem como tomada (por outro aparelho ou por um POST cuja resposta se
+     * perdeu) vira "sincronizada" sem novo POST. Isso só cobre o dia atual e depende de associação
+     * única por nome + dosagem; a deduplicação definitiva entre aparelhos é do backend.
+     * Um 409 do servidor é tratado como "esta dose já existe" e confirma a linha.
      */
     suspend fun syncPending(
         userId: Int,
         zone: ZoneId = ZoneId.systemDefault()
     ): SyncOutcome = syncMutex.withLock {
-        val pending = dao.getUnsyncedByUser(userId)
+        var pending = dao.getUnsyncedByUser(userId)
+        if (pending.isNotEmpty()) {
+            reconcileBeforeSending(userId, pending, zone)
+            pending = dao.getUnsyncedByUser(userId)
+        }
 
         var sent = 0
+        var duplicates = 0
         var rejected = 0
         var waiting = 0
         var retry = false
@@ -223,6 +244,10 @@ class HistoryRepository(
 
                 is SendResult.Http -> when {
                     result.code == 401 -> break@loop
+                    result.code == 409 -> {
+                        dao.markSynced(row.id)
+                        duplicates++
+                    }
                     result.code >= 500 -> {
                         retry = true
                         break@loop
@@ -238,7 +263,31 @@ class HistoryRepository(
             }
         }
 
-        SyncOutcome(sent = sent, rejected = rejected, waiting = waiting, shouldRetry = retry)
+        SyncOutcome(
+            sent = sent,
+            rejected = rejected,
+            waiting = waiting,
+            shouldRetry = retry,
+            duplicates = duplicates
+        )
+    }
+
+    /** Melhor esforço: se o doseDia falhar, o envio segue e o backend decide sobre duplicatas. */
+    private suspend fun reconcileBeforeSending(
+        userId: Int,
+        pending: List<DoseHistoryEntity>,
+        zone: ZoneId
+    ) {
+        val today = LocalDate.now(zone)
+        if (pending.none { it.dia == today.toString() }) return
+        try {
+            val remote = api.getDosesDia(userId)
+            reconcileToday(userId, remote, dao.medicationsOf(userId), zone, today)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            AppLog.w(TAG, "Não foi possível conferir o doseDia antes de enviar", e)
+        }
     }
 
     private suspend fun send(request: DoseTakenRequest): SendResult =

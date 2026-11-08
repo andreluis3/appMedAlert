@@ -14,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import com.andre.medalert.sync.MedicationSyncWorker
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -91,6 +92,9 @@ fun CadastroMedScreen(
     LaunchedEffect(state) {
         if (state is MedUiState.Success) {
             if (state.savedOffline) {
+                // Fica na fila do WorkManager até a conexão voltar; depois as doses que
+                // esperavam o ID remoto do medicamento também seguem.
+                MedicationSyncWorker.enqueueFollowUp(context)
                 Toast.makeText(
                     context,
                     "Sem internet: medicamento salvo no celular e será enviado depois.",

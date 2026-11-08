@@ -16,7 +16,7 @@ import com.andre.medalert.data.local.entity.MedicationEntity
         MedicationEntity::class,
         DoseHistoryEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -190,13 +190,43 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 7 -> 8 (só ADD COLUMN, UPDATE e CREATE INDEX: nenhuma linha é apagada):
+         * - dose_history.clientEventId / origem / registradoPorId: identidade e autoria da administração;
+         * - índice (medicamentoId, previstoEm), NÃO único: linhas antigas podem repetir o par e
+         *   esta migration não pode apagar registros (a deduplicação é feita no DAO).
+         *
+         * Administrações que ainda estão pendentes de envio (isSynced = 0) só podem ter sido
+         * registradas pelo paciente (cuidador era somente leitura), então recebem
+         * origem = "paciente" e um clientEventId novo, estável a partir de agora.
+         * Linhas já sincronizadas ficam com origem NULL (autor desconhecido).
+         */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `dose_history` ADD COLUMN `clientEventId` TEXT")
+                db.execSQL("ALTER TABLE `dose_history` ADD COLUMN `origem` TEXT")
+                db.execSQL("ALTER TABLE `dose_history` ADD COLUMN `registradoPorId` INTEGER")
+                db.execSQL(
+                    "UPDATE `dose_history` " +
+                            "SET `clientEventId` = lower(hex(randomblob(16))), " +
+                            "`origem` = 'paciente', `registradoPorId` = `userId` " +
+                            "WHERE `isSynced` = 0 AND `medicationLocalId` IS NOT NULL"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_dose_history_medicamentoId_previstoEm` " +
+                            "ON `dose_history` (`medicamentoId`, `previstoEm`)"
+                )
+            }
+        }
+
         /** Todas as migrations, na ordem. Usada pelo app e pelos testes de migração. */
         val ALL_MIGRATIONS: Array<Migration> = arrayOf(
             MIGRATION_2_3,
             MIGRATION_3_4,
             MIGRATION_4_5,
             MIGRATION_5_6,
-            MIGRATION_6_7
+            MIGRATION_6_7,
+            MIGRATION_7_8
         )
 
         fun getInstance(context: Context): AppDatabase =

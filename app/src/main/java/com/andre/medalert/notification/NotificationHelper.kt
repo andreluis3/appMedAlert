@@ -33,6 +33,10 @@ object NotificationHelper {
     private const val STOCK_CHANNEL_NAME = "Estoque de medicamentos"
     private const val STOCK_NOTIFICATION_ID_BASE = 7_000_000
 
+    // Eventos vindos de outro aparelho via FCM (dose registrada, medicamento alterado, atrasos).
+    const val REMOTE_CHANNEL_ID = "medalert_remote_events_channel"
+    private const val REMOTE_CHANNEL_NAME = "Atualizações do paciente e do cuidador"
+
     const val EXTRA_NOTIFICATION_ID = "extra_notification_id"
     const val EXTRA_LOCAL_ID = "extra_local_id"
     const val EXTRA_SCHEDULED_AT = "extra_scheduled_at"
@@ -74,6 +78,16 @@ object NotificationHelper {
 
             manager.createNotificationChannel(
                 NotificationChannel(
+                    REMOTE_CHANNEL_ID,
+                    REMOTE_CHANNEL_NAME,
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "Avisos sobre doses e medicamentos do paciente acompanhado"
+                }
+            )
+
+            manager.createNotificationChannel(
+                NotificationChannel(
                     STOCK_CHANNEL_ID,
                     STOCK_CHANNEL_NAME,
                     NotificationManager.IMPORTANCE_DEFAULT
@@ -81,6 +95,48 @@ object NotificationHelper {
                     description = "Avisa quando o estoque de um medicamento está acabando"
                 }
             )
+        }
+    }
+
+    /**
+     * Aviso de um evento remoto (FCM). O [notificationId] vem do evento: repetir o mesmo evento
+     * substitui a notificação em vez de duplicá-la. Toque abre o app. Não faz nada se as
+     * notificações estiverem desligadas.
+     */
+    @SuppressLint("MissingPermission")
+    fun showRemoteEventNotification(
+        context: Context,
+        notificationId: Int,
+        title: String,
+        text: String
+    ) {
+        val manager = NotificationManagerCompat.from(context)
+        if (!manager.areNotificationsEnabled()) return
+
+        val openApp = PendingIntent.getActivity(
+            context,
+            notificationId,
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(context, REMOTE_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_medalert)
+            .setColor(COLOR_ACCENT)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setContentIntent(openApp)
+            .setAutoCancel(true)
+
+        try {
+            manager.notify(notificationId, builder.build())
+        } catch (_: SecurityException) {
+            // Permissão revogada no meio do caminho.
         }
     }
 

@@ -23,6 +23,13 @@ import androidx.room.PrimaryKey
  *
  * isSynced = false: dose registrada localmente que ainda não foi enviada à API.
  *
+ * Identidade da administração (preenchida em registros feitos neste aparelho):
+ * - clientEventId: UUID gerado no aparelho quando a administração é registrada. Fica guardado para
+ *   o backend poder usá-lo como chave de idempotência (hoje o POST /api/historys NÃO o recebe).
+ * - origem: "paciente" ou "cuidador" (quem registrou). null = origem desconhecida (linhas antigas ou
+ *   vindas do GET doseDia, que não informa o autor).
+ * - registradoPorId: ID do usuário (paciente ou cuidador) que registrou, quando conhecido.
+ *
  * medicamentoRemovido: o medicamento foi excluído depois da dose. O REGISTRO É PRESERVADO (nome e
  * dosagem ficam gravados aqui) e só ganha esta marca. Linhas marcadas NÃO devem ser enviadas à
  * API: o medicamento remoto já não existe (o backend apaga o histórico em cascata).
@@ -31,7 +38,11 @@ import androidx.room.PrimaryKey
     tableName = "dose_history",
     indices = [
         Index("userId"),
-        Index(value = ["medicationLocalId", "previstoEm"], unique = true)
+        Index(value = ["medicationLocalId", "previstoEm"], unique = true),
+        // Identidade da dose ENTRE aparelhos: medicamento REMOTO + horário previsto.
+        // Não é único de propósito: linhas antigas podem ter repetições e a migration não apaga nada.
+        // A deduplicação é feita no código (DAO) e, de forma definitiva, pelo backend.
+        Index(value = ["medicamentoId", "previstoEm"])
     ]
 )
 data class DoseHistoryEntity(
@@ -49,5 +60,8 @@ data class DoseHistoryEntity(
     val tomadoEm: Long? = null,
     val dia: String? = null,
     @ColumnInfo(defaultValue = "0")
-    val medicamentoRemovido: Boolean = false
+    val medicamentoRemovido: Boolean = false,
+    val clientEventId: String? = null,
+    val origem: String? = null,
+    val registradoPorId: Int? = null
 )

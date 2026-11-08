@@ -29,16 +29,20 @@ import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.widget.Toast
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.andre.medalert.ui.components.BottomNavigationBar
 import com.andre.medalert.ui.components.DosyLogo
@@ -69,6 +73,14 @@ fun HomeScreen(
     viewModel: HomeViewModel = viewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+
+    // Resultado de "Registrar" (dose registrada, já registrada, erro).
+    LaunchedEffect(viewModel) {
+        viewModel.messages.collect { message ->
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // Popup de permissões (aparece uma vez por abertura do app, se faltar algo).
     NotificationPermissionDialog(refreshKey = permissionRefreshKey)
@@ -138,7 +150,7 @@ fun HomeScreen(
                 )
             } else {
                 state.dosesToday.forEach { dose ->
-                    MedicationDoseRow(dose)
+                    MedicationDoseRow(dose, onRegister = { viewModel.registerDose(dose) })
                     Spacer(modifier = Modifier.height(10.dp))
                 }
             }
@@ -229,7 +241,7 @@ private fun UpcomingTimeChip(time: String) {
 }
 
 @Composable
-private fun MedicationDoseRow(dose: HomeDoseUi) {
+private fun MedicationDoseRow(dose: HomeDoseUi, onRegister: () -> Unit) {
     val iconColor = when {
         dose.isTaken -> MedAlertStatusGreen
         dose.isPast -> MedAlertTextSecondary
@@ -283,6 +295,16 @@ private fun MedicationDoseRow(dose: HomeDoseUi) {
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold
                 )
+            } else if (dose.isPast) {
+                // Paciente ou cuidador registram a administração de uma dose já no horário.
+                TextButton(onClick = onRegister) {
+                    Text(
+                        text = "Registrar",
+                        color = MedAlertPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
         }
     }
