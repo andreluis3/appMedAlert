@@ -7,6 +7,8 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.andre.medalert.data.model.PendingInvite
+import com.andre.medalert.data.model.PendingInviteCodec
 import com.andre.medalert.data.session.SessionInfo
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -25,6 +27,7 @@ class UserPreferencesRepository(context: Context) {
         val USER_NAME = stringPreferencesKey("user_name")
         val USER_EMAIL = stringPreferencesKey("user_email")
         val FCM_REGISTERED = stringPreferencesKey("fcm_registered")
+        val PENDING_INVITES = stringPreferencesKey("pending_invites")
     }
 
     val userId: Flow<Int?> = dataStore.data.map { it[Keys.USER_ID] }
@@ -107,6 +110,41 @@ class UserPreferencesRepository(context: Context) {
 
     suspend fun saveFcmRegistered(marker: String) {
         dataStore.edit { prefs -> prefs[Keys.FCM_REGISTERED] = marker }
+    }
+
+    /**
+     * Convites de vínculo recebidos pelo cuidador e ainda não tratados (mais recente primeiro).
+     * Chave própria: NÃO mexe na sessão ([saveSession] não toca nela) e some no logout ([clear]).
+     */
+    val pendingInvites: Flow<List<PendingInvite>> =
+        dataStore.data.map { PendingInviteCodec.decode(it[Keys.PENDING_INVITES]) }
+
+    /** Guarda o convite sem duplicar o mesmo paciente. Devolve true se era novo. */
+    suspend fun addPendingInvite(pacienteId: Int, receivedAtMillis: Long): Boolean {
+        var inserted = false
+        dataStore.edit { prefs ->
+            val current = PendingInviteCodec.decode(prefs[Keys.PENDING_INVITES])
+            if (current.none { it.pacienteId == pacienteId }) {
+                inserted = true
+                prefs[Keys.PENDING_INVITES] = PendingInviteCodec.encode(
+                    PendingInviteCodec.add(current, PendingInvite(pacienteId, receivedAtMillis))
+                )
+            }
+        }
+        return inserted
+    }
+
+    /** Remove o convite do paciente (para a etapa do aceite/recusa). */
+    suspend fun removePendingInvite(pacienteId: Int) {
+        dataStore.edit { prefs ->
+            val remaining = PendingInviteCodec.decode(prefs[Keys.PENDING_INVITES])
+                .filterNot { it.pacienteId == pacienteId }
+            if (remaining.isEmpty()) {
+                prefs.remove(Keys.PENDING_INVITES)
+            } else {
+                prefs[Keys.PENDING_INVITES] = PendingInviteCodec.encode(remaining)
+            }
+        }
     }
 
     suspend fun clear() {

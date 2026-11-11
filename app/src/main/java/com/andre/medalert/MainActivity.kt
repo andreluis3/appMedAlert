@@ -1,5 +1,6 @@
 package com.andre.medalert
 
+import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -19,10 +20,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.andre.medalert.data.mapper.toMedication
 import com.andre.medalert.data.session.AccessPolicy
+import com.andre.medalert.fcm.InviteIntake
 import com.andre.medalert.ui.components.BlockForCaregiver
 import com.andre.medalert.data.remote.SessionManager
 import com.andre.medalert.notification.MedicationReminderManager
@@ -43,6 +46,7 @@ import com.andre.medalert.ui.screens.notifications.NotificationScreen
 import com.andre.medalert.ui.screens.onboarding.OnboardingScreen
 import com.andre.medalert.ui.screens.profile.ProfileScreen
 import com.andre.medalert.ui.screens.responsibles.AddResponsibleScreen
+import com.andre.medalert.ui.screens.responsibles.CaregiverInviteScreen
 import com.andre.medalert.ui.screens.responsibles.CaregiverRequestScreen
 import com.andre.medalert.ui.screens.responsibles.ResponsiblesScreen
 import com.andre.medalert.ui.screens.settings.SettingsScreen
@@ -58,11 +62,19 @@ class MainActivity : ComponentActivity() {
     // Muda a cada retorno ao app (ex.: vindo das Configurações) para a Home reavaliar as permissões.
     private var resumeTick by mutableIntStateOf(0)
 
+    // ID do PACIENTE de um convite cuja notificação o usuário tocou. A navegação o consome
+    // (e zera) assim que o app já saiu da splash/login.
+    private var inviteNavRequest by mutableStateOf<Int?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         enableEdgeToEdge()
         NotificationHelper.createNotificationChannel(this)
+
+        // Abertura a frio pela notificação: o sistema entrega o `data` nos extras deste intent.
+        // (Em recriação por rotação o intent é o mesmo: não reprocessa.)
+        if (savedInstanceState == null) handleInviteIntent(intent)
 
         // A permissão de notificações NÃO é pedida aqui: a Home mostra o NotificationPermissionDialog.
 
@@ -151,6 +163,19 @@ class MainActivity : ComponentActivity() {
                                 inclusive = true
                             }
                         }
+                    }
+                }
+
+                // Convite tocado na notificação: espera sair da splash/login e abre a tela do convite.
+                val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
+                LaunchedEffect(inviteNavRequest, currentRoute) {
+                    val pacienteId = inviteNavRequest ?: return@LaunchedEffect
+                    val rotasSemSessao = setOf("splash", "onboarding", "login", "cadastro")
+                    if (currentRoute == null || currentRoute in rotasSemSessao) return@LaunchedEffect
+
+                    inviteNavRequest = null
+                    navController.navigate("caregiverInvite/$pacienteId") {
+                        launchSingleTop = true
                     }
                 }
 
@@ -272,6 +297,36 @@ class MainActivity : ComponentActivity() {
                         CaregiverRequestScreen(
                             onBackClick = {
                                 navController.popBackStack()
+                            }
+                        )
+                    }
+
+                    // Convite de vínculo pendente (ETAPA 1: aceitar/recusar ainda não chamam a API).
+                    composable(
+                        route = "caregiverInvite/{pacienteId}",
+                        arguments = listOf(
+                            navArgument("pacienteId") {
+                                type = NavType.IntType
+                            }
+                        )
+                    ) {
+                        CaregiverInviteScreen(
+                            onBackClick = {
+                                navController.popBackStack()
+                            },
+                            onAcceptClick = {
+                                Toast.makeText(
+                                    context,
+                                    "O aceite do vínculo será ligado na próxima etapa.",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            onDeclineClick = {
+                                Toast.makeText(
+                                    context,
+                                    "A recusa depende de suporte da API (ainda não existe).",
+                                    Toast.LENGTH_SHORT
+                                ).show()
                             }
                         )
                     }
@@ -517,6 +572,33 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    // Com launchMode singleTop, tocar na notificação com o app já aberto/em segundo plano
+    // entrega o intent novo aqui (e não recria a Activity).
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleInviteIntent(intent)
+    }
+
+    /**
+     * Lê o `pacientId` dos extras do intent (notificação mostrada pelo sistema ou pelo
+     * [com.andre.medalert.fcm.RemoteEventHandler]), persiste o convite e pede a navegação.
+     * Não aceita o vínculo. Ignora intents reentregues ao reabrir pelo histórico de recentes.
+     */
+    private fun handleInviteIntent(intent: Intent?) {
+        if (intent == null) return
+        if ((intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) return
+
+        val raw = intent.getStringExtra(InviteIntake.KEY_PACIENT_ID) ?: return
+        // Consome o extra: evita reprocessar o mesmo toque em onNewIntent/recriação.
+        intent.removeExtra(InviteIntake.KEY_PACIENT_ID)
+
+        lifecycleScope.launch {
+            val pacienteId = InviteIntake.capture(applicationContext, raw, "intent")
+            if (pacienteId != null) inviteNavRequest = pacienteId
         }
     }
 

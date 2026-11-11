@@ -18,6 +18,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.andre.medalert.MainActivity
 import com.andre.medalert.R
+import com.andre.medalert.fcm.InviteIntake
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -102,13 +103,17 @@ object NotificationHelper {
      * Aviso de um evento remoto (FCM). O [notificationId] vem do evento: repetir o mesmo evento
      * substitui a notificação em vez de duplicá-la. Toque abre o app. Não faz nada se as
      * notificações estiverem desligadas.
+     *
+     * [invitePacienteId]: convite de cuidador. Vai como extra "pacientId" (texto, igual ao que o
+     * sistema entrega quando ele mesmo mostra a notificação), para a MainActivity abrir o convite.
      */
     @SuppressLint("MissingPermission")
     fun showRemoteEventNotification(
         context: Context,
         notificationId: Int,
         title: String,
-        text: String
+        text: String,
+        invitePacienteId: Int? = null
     ) {
         val manager = NotificationManagerCompat.from(context)
         if (!manager.areNotificationsEnabled()) return
@@ -118,6 +123,7 @@ object NotificationHelper {
             notificationId,
             Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                invitePacienteId?.let { putExtra(InviteIntake.KEY_PACIENT_ID, it.toString()) }
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
