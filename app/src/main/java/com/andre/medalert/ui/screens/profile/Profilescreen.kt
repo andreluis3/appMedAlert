@@ -23,6 +23,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.andre.medalert.ui.theme.MedAlertBackground
 import com.andre.medalert.ui.theme.MedAlertCard
 import com.andre.medalert.ui.theme.MedAlertPrimary
+import com.andre.medalert.ui.theme.MedAlertStatusGreen
+import com.andre.medalert.ui.theme.MedAlertStatusOrange
 import com.andre.medalert.ui.theme.MedAlertTextSecondary
 import androidx.compose.ui.platform.LocalContext
 import com.andre.medalert.viewmodel.ProfileViewModelFactory
@@ -52,6 +54,7 @@ fun ProfileScreen(
     )
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val tipoLabel = if (uiState.isCaregiver) "Cuidador" else "Paciente"
 
     Scaffold(
         containerColor = MedAlertBackground
@@ -111,8 +114,9 @@ fun ProfileScreen(
                         modifier = Modifier.size(20.dp)
                     )
                 } else {
+                    // Sem nome na sessão (a API não o devolve no login), mostra o tipo da conta.
                     Text(
-                        text = uiState.nome,
+                        text = uiState.nome ?: "Conta de ${tipoLabel.lowercase()}",
                         color = TextPrimary,
                         fontSize = 18.sp,
                         fontWeight = FontWeight.SemiBold
@@ -122,6 +126,8 @@ fun ProfileScreen(
                         color = MedAlertTextSecondary,
                         fontSize = 13.sp
                     )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    ProfileBadge(text = tipoLabel, color = MedAlertPrimary)
                 }
             }
 
@@ -130,14 +136,28 @@ fun ProfileScreen(
             ProfileInfoCard {
                 ProfileInfoRow(
                     label = "Nome",
-                    value = uiState.nome
+                    value = uiState.nome ?: "Não informado"
                 )
 
                 ProfileInfoRow(
                     label = "Email",
-                    value = uiState.email,
+                    value = uiState.email
+                )
+
+                ProfileInfoRow(
+                    label = "Tipo de conta",
+                    value = tipoLabel,
                     showDivider = false
                 )
+            }
+
+            // Só o cuidador tem vínculo. O nome do paciente não existe na API: mostra o ID.
+            if (uiState.isCaregiver) {
+                ProfileSectionTitle("Vínculo")
+
+                ProfileInfoCard {
+                    ProfileLinkRow(pacienteId = uiState.pacienteVinculadoId)
+                }
             }
 
             ProfileSectionTitle("Segurança")
@@ -165,6 +185,47 @@ fun ProfileScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
         }
+    }
+}
+
+@Composable
+private fun ProfileBadge(text: String, color: Color) {
+    Box(
+        modifier = Modifier
+            .background(color.copy(alpha = 0.15f), shape = RoundedCornerShape(8.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+    ) {
+        Text(
+            text = text,
+            color = color,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+/** Linha da seção "Vínculo" do cuidador: paciente acompanhado e situação do vínculo. */
+@Composable
+private fun ProfileLinkRow(pacienteId: Int?) {
+    val linked = pacienteId != null
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = if (linked) "Cuidador de paciente #$pacienteId" else "Nenhum paciente vinculado",
+            color = TextPrimary,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(1f)
+        )
+        ProfileBadge(
+            text = if (linked) "Vínculo ativo" else "Aguardando vínculo",
+            color = if (linked) MedAlertStatusGreen else MedAlertStatusOrange
+        )
     }
 }
 

@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.andre.medalert.data.model.PendingInvite
 import com.andre.medalert.data.model.PendingInviteCodec
+import com.andre.medalert.data.session.AccessPolicy
 import com.andre.medalert.data.session.SessionInfo
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -137,14 +138,50 @@ class UserPreferencesRepository(context: Context) {
     /** Remove o convite do paciente (para a etapa do aceite/recusa). */
     suspend fun removePendingInvite(pacienteId: Int) {
         dataStore.edit { prefs ->
-            val remaining = PendingInviteCodec.decode(prefs[Keys.PENDING_INVITES])
-                .filterNot { it.pacienteId == pacienteId }
+            val remaining = PendingInviteCodec.remove(
+                PendingInviteCodec.decode(prefs[Keys.PENDING_INVITES]),
+                pacienteId
+            )
             if (remaining.isEmpty()) {
                 prefs.remove(Keys.PENDING_INVITES)
             } else {
                 prefs[Keys.PENDING_INVITES] = PendingInviteCodec.encode(remaining)
             }
         }
+    }
+
+    /**
+     * Vínculo do CUIDADOR com o paciente (depois que a API confirmou o aceite).
+     *
+     * Grava SÓ o `paciente_id`: não toca em user_id, token, user_type, user_name, user_email nem
+     * no marcador do FCM, e não faz logout. Na MESMA transação remove o convite pendente desse
+     * paciente, então nunca existe um estado intermediário (vinculado, mas com o convite ainda lá).
+     *
+     * Devolve false, sem gravar nada, se o id for inválido ou a sessão não for de cuidador.
+     * Quem observa a sessão (Home, Medicamentos, SessionLifecycle) reage sozinho à mudança.
+     */
+    suspend fun updateLinkedPatientId(pacienteId: Int): Boolean {
+        if (pacienteId <= 0) return false
+        var updated = false
+        dataStore.edit { prefs ->
+            val caregiverSession = (prefs[Keys.USER_ID] ?: 0) > 0 &&
+                    AccessPolicy.isCaregiver(prefs[Keys.USER_TYPE])
+            if (!caregiverSession) return@edit
+
+            prefs[Keys.PACIENTE_ID] = pacienteId
+
+            val remaining = PendingInviteCodec.remove(
+                PendingInviteCodec.decode(prefs[Keys.PENDING_INVITES]),
+                pacienteId
+            )
+            if (remaining.isEmpty()) {
+                prefs.remove(Keys.PENDING_INVITES)
+            } else {
+                prefs[Keys.PENDING_INVITES] = PendingInviteCodec.encode(remaining)
+            }
+            updated = true
+        }
+        return updated
     }
 
     suspend fun clear() {

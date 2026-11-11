@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import com.andre.medalert.data.repository.HistoryRepository
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
@@ -60,7 +61,9 @@ data class HomeUiState(
     val medicationsToday: Int = 0,
     val adherenceLabel: String = "Sem dados",
     /** Cuidador sem paciente vinculado: a Home mostra o aviso em vez de uma tela vazia. */
-    val awaitingLink: Boolean = false
+    val awaitingLink: Boolean = false,
+    /** Cuidador vinculado: ID do paciente acompanhado (a API não devolve o nome dele). */
+    val linkedPatientId: Int? = null
 )
 
 private val HORA_FORMAT = DateTimeFormatter.ofPattern("HH:mm")
@@ -89,12 +92,18 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * Paciente cujos dados a Home mostra (o próprio, ou o vinculado ao cuidador). Muda sozinho
+     * quando o aceite grava o paciente_id: nada aqui exige recriar o ViewModel nem novo login.
+     */
+    private val patientIdFlow: Flow<Int?> = prefs.session
+        .map { AccessPolicy.patientIdFor(it.tipo, it.userId, it.pacienteId) }
+        .distinctUntilChanged()
+
+    /**
      * Doses já tomadas (registradas pela notificação), como "idLocal-horárioPrevistoMillis".
      * Observa o Room, então a Home atualiza sozinha quando "Tomar agora" é tocado.
      */
-    private val takenKeys: Flow<Set<String>> = flow {
-        emit(SessionUser.patientId(application))
-    }.flatMapLatest { patientId ->
+    private val takenKeys: Flow<Set<String>> = patientIdFlow.flatMapLatest { patientId ->
         if (patientId == null) {
             flowOf(emptySet())
         } else {
@@ -110,8 +119,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private val awaitingLink: Flow<Boolean> = prefs.session
-        .map { AccessPolicy.isAwaitingLink(it.tipo, it.userId, it.pacienteId) }
+    /** (aguardando vínculo, paciente vinculado). Atualiza sozinho quando o aceite grava o paciente_id. */
+    private val linkState: Flow<Pair<Boolean, Int?>> = prefs.session
+        .map { session ->
+            val linked = if (AccessPolicy.canViewLinkedPatient(session.tipo, session.pacienteId)) {
+                session.pacienteId
+            } else {
+                null
+            }
+            AccessPolicy.isAwaitingLink(session.tipo, session.userId, session.pacienteId) to linked
+        }
         .distinctUntilChanged()
 
     val uiState: StateFlow<HomeUiState> = combine(
@@ -119,27 +136,35 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         SessionMedications.observe(application),
         ticker,
         adherence,
-        takenKeys.combine(awaitingLink) { taken, awaiting -> taken to awaiting }
-    ) { name, medications, now, adherenceLabel, (taken, awaiting) ->
-        build(name, medications, now, adherenceLabel, taken).copy(awaitingLink = awaiting)
+        takenKeys.combine(linkState) { taken, link -> taken to link }
+    ) { name, medications, now, adherenceLabel, (taken, link) ->
+        build(name, medications, now, adherenceLabel, taken)
+            .copy(awaitingLink = link.first, linkedPatientId = link.second)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
     init {
+        // Reage à sessão: quando o cuidador aceita o vínculo o paciente_id muda e a Home carrega
+        // os dados do paciente sem recriar o ViewModel nem pedir novo login.
         viewModelScope.launch {
-            val patientId = SessionUser.patientId(getApplication()) ?: return@launch
-            // Offline-first: se falhar, a Home continua com o que já está no Room.
-            medicationRepository.refresh(patientId)
-            val dashboard = runCatching { historyRepository.getDashboard(patientId) }.getOrNull()
-            adherence.value = if (dashboard != null && dashboard.dosesEsp > 0) {
-                formatPercent(dashboard.adesao)
-            } else {
-                // Sem internet, erro do servidor ou servidor sem dados: calcula com o Room.
-                runCatching { LocalAdherence.compute(getApplication(), patientId) }
-                    .getOrNull()
-                    ?.takeIf { it.expected > 0 }
-                    ?.percent
-                    ?.let { "$it%" }
-                    ?: "Sem dados"
+            patientIdFlow.collectLatest { patientId ->
+                if (patientId == null) {
+                    adherence.value = "Sem dados"
+                    return@collectLatest
+                }
+                // Offline-first: se falhar, a Home continua com o que já está no Room.
+                medicationRepository.refresh(patientId)
+                val dashboard = runCatching { historyRepository.getDashboard(patientId) }.getOrNull()
+                adherence.value = if (dashboard != null && dashboard.dosesEsp > 0) {
+                    formatPercent(dashboard.adesao)
+                } else {
+                    // Sem internet, erro do servidor ou servidor sem dados: calcula com o Room.
+                    runCatching { LocalAdherence.compute(getApplication(), patientId) }
+                        .getOrNull()
+                        ?.takeIf { it.expected > 0 }
+                        ?.percent
+                        ?.let { "$it%" }
+                        ?: "Sem dados"
+                }
             }
         }
     }

@@ -301,7 +301,7 @@ class MainActivity : ComponentActivity() {
                         )
                     }
 
-                    // Convite de vínculo pendente (ETAPA 1: aceitar/recusar ainda não chamam a API).
+                    // Convite de vínculo pendente: aceitar chama a API; recusar é só local.
                     composable(
                         route = "caregiverInvite/{pacienteId}",
                         arguments = listOf(
@@ -314,19 +314,20 @@ class MainActivity : ComponentActivity() {
                             onBackClick = {
                                 navController.popBackStack()
                             },
-                            onAcceptClick = {
-                                Toast.makeText(
-                                    context,
-                                    "O aceite do vínculo será ligado na próxima etapa.",
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                            // Depois do aceite a sessão já foi atualizada: a Home reage sozinha.
+                            onAccepted = {
+                                navController.navigate("home") {
+                                    popUpTo("home")
+                                    launchSingleTop = true
+                                }
                             },
-                            onDeclineClick = {
+                            onDeclined = {
                                 Toast.makeText(
                                     context,
-                                    "A recusa depende de suporte da API (ainda não existe).",
+                                    "Convite removido deste aparelho.",
                                     Toast.LENGTH_SHORT
                                 ).show()
+                                navController.popBackStack()
                             }
                         )
                     }

@@ -115,6 +115,11 @@ fun HomeScreen(
                 return@Column
             }
 
+            state.linkedPatientId?.let { linkedId ->
+                LinkedPatientBanner(patientId = linkedId)
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
             if (state.upcomingTimes.isNotEmpty()) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     items(state.upcomingTimes) { time -> UpcomingTimeChip(time) }
@@ -221,6 +226,44 @@ private fun HomeHeader(userName: String?, subtitle: String, onBellClick: () -> U
             color = MedAlertTextSecondary,
             fontSize = 14.sp
         )
+    }
+}
+
+/** Cuidador vinculado: deixa claro de quem são os dados. O nome do paciente não existe na API. */
+@Composable
+private fun LinkedPatientBanner(patientId: Int) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MedAlertCard, shape = RoundedCornerShape(16.dp))
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .background(MedAlertPrimary.copy(alpha = 0.15f), shape = CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Filled.People,
+                contentDescription = null,
+                tint = MedAlertPrimary,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Acompanhando o paciente #$patientId",
+                color = MedAlertTextPrimary,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text("Vínculo ativo", color = MedAlertStatusGreen, fontSize = 12.sp)
+        }
     }
 }
 

@@ -44,6 +44,10 @@ object PendingInviteCodec {
             .distinctBy { it.pacienteId }
     }
 
+    /** Lista sem o convite desse paciente (aceito ou recusado). */
+    fun remove(current: List<PendingInvite>, pacienteId: Int): List<PendingInvite> =
+        current.filterNot { it.pacienteId == pacienteId }
+
     /** Coloca o convite no topo. Se o paciente já tem convite pendente, a lista não muda. */
     fun add(current: List<PendingInvite>, invite: PendingInvite): List<PendingInvite> =
         if (current.any { it.pacienteId == invite.pacienteId }) {

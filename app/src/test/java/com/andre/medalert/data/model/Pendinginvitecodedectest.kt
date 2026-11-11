@@ -46,6 +46,14 @@ class PendingInviteCodecTest {
     }
 
     @Test
+    fun remove_tiraSoOConviteDoPacienteIndicado() {
+        val atual = listOf(PendingInvite(9, 1000L), PendingInvite(4, 500L))
+        assertEquals(listOf(PendingInvite(4, 500L)), PendingInviteCodec.remove(atual, 9))
+        assertEquals(atual, PendingInviteCodec.remove(atual, 77))
+        assertEquals(emptyList<PendingInvite>(), PendingInviteCodec.remove(emptyList(), 9))
+    }
+
+    @Test
     fun add_respeitaOLimite() {
         var lista = emptyList<PendingInvite>()
         for (i in 1..(PendingInviteCodec.MAX_INVITES + 3)) {
