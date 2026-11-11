@@ -28,8 +28,10 @@ import java.time.ZoneId
  *  - medicamento_id (opcional): ID REMOTO do medicamento;
  *  - previsto_em (opcional): horário previsto da dose (epoch millis ou ISO-8601 com offset);
  *  - titulo / mensagem (opcionais): textos prontos; sem eles usa-se um texto padrão do tipo.
- * O convite de cuidador que o backend já envia (/api/users/requestCuidador) tem payload ainda
- * não documentado: cai no caso genérico e aparece com o título/texto que vierem na mensagem.
+ * Convite de cuidador (/api/users/requestCuidador): a mensagem traz `notification` (título/texto)
+ * e `data = { pacientId }`. Com o app ABERTO este handler persiste o convite via [InviteIntake];
+ * com o app em segundo plano/fechado quem mostra a notificação é o sistema e o `pacientId` chega
+ * pelos extras do Intent na MainActivity (ver InviteIntake).
  */
 object RemoteEventHandler {
 
@@ -86,10 +88,20 @@ object RemoteEventHandler {
                 // 1) Sinalização -> sincronização real (a API e o Room são a fonte de verdade).
                 MedicationSyncWorker.enqueueFollowUp(app)
 
+                // 1b) Convite de cuidador: persiste ANTES de qualquer outra decisão, para não perder
+                // a solicitação. Não aceita nada: só guarda o pacientId.
+                val invitePacienteId = if (data.containsKey(InviteIntake.KEY_PACIENT_ID)) {
+                    InviteIntake.capture(app, data[InviteIntake.KEY_PACIENT_ID], "onMessageReceived")
+                } else {
+                    null
+                }
+
                 // 2) Aviso local.
                 val type = EventType.fromWire(data[KEY_TIPO])
                 val title = data[KEY_TITULO] ?: notifTitle ?: type?.defaultTitle
+                ?: invitePacienteId?.let { INVITE_DEFAULT_TITLE }
                 val text = data[KEY_MENSAGEM] ?: notifBody ?: type?.defaultText
+                ?: invitePacienteId?.let { INVITE_DEFAULT_TEXT }
                 if (title == null || text == null) return@runBlocking
 
                 // Eventos sobre o paciente não interessam a um cuidador que ainda não tem vínculo.
@@ -114,7 +126,8 @@ object RemoteEventHandler {
                     context = app,
                     notificationId = notificationIdFor(type, medicationRemoteId, scheduledAt, title),
                     title = title,
-                    text = text
+                    text = text,
+                    invitePacienteId = invitePacienteId
                 )
             }
         } catch (e: CancellationException) {
@@ -142,4 +155,9 @@ object RemoteEventHandler {
     }
 
     private const val REMOTE_NOTIFICATION_ID_BASE = 9_000_000
+
+    // Só usados se a mensagem vier sem `notification` nem textos próprios.
+    private const val INVITE_DEFAULT_TITLE = "Você tem um novo paciente"
+    private const val INVITE_DEFAULT_TEXT =
+        "Um paciente deseja que você seja o cuidador dele. Abra o aplicativo para ver o convite."
 }

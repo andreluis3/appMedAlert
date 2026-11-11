@@ -53,7 +53,7 @@ object FcmTokenManager {
 
         return try {
             val token = fetchToken()
-            AppLog.d(TAG, "DEBUG token obtido=${token.take(20)}...")
+            AppLog.d(TAG, "DEBUG token obtido (tamanho=${token.length})")
             val marker = "$userId:$token"
             if (prefs.fcmRegistered.first() == marker) return Result.success(Unit)
 
