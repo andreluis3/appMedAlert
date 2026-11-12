@@ -24,7 +24,7 @@ private fun interpretarDosagem(texto: String): Pair<Double, String?>? {
 
 /**
  * API -> banco local (já sincronizado). Guarda o ID do medicamento em remoteId.
- * Com o GET completo traz também datas, frequência, quantidade, unidades, estoque, observações
+ * Com o GET completo traz também datas, frequência, quantidade, unidades, observações
  * e ativo. Se o servidor não mandar algum (versão antiga), fica null/padrão e o
  * preservingDetailsFrom (no DAO) mantém o que o aparelho já sabia.
  *
@@ -60,8 +60,6 @@ fun MedicamentoResponse.toEntity(userId: Int): MedicationEntity {
         quantidade = quantidade,
         unidadeDosagem = unidade,
         unidadeQuantidade = unidadeQuantidade,
-        estoque = estoque,
-        estoqueMinimo = estoqueMinimo,
         observacoes = observacoes,
         ativo = ativo ?: true,
         isSynced = true,
@@ -83,7 +81,6 @@ fun MedicamentoData.toEntity(): MedicationEntity =
         quantidade = quantidade,
         unidadeDosagem = unidadeDosagem,
         unidadeQuantidade = unidadeQuantidade,
-        estoque = estoque,
         observacoes = observacoes,
         isSynced = false
     )
@@ -91,7 +88,7 @@ fun MedicamentoData.toEntity(): MedicationEntity =
 /**
  * Banco local -> corpo do POST /api/meds (JSON flat).
  * Retorna null se faltar algum campo obrigatório (ex.: medicamento que veio da API).
- * dataFim, estoque e observacoes são opcionais na API.
+ * dataFim e observacoes são opcionais na API.
  * O horário sempre sai como "HH:mm", mesmo que um registro antigo tenha o ISO da API.
  */
 fun MedicationEntity.toMedicamentoDataOrNull(): MedicamentoData? {
@@ -105,7 +102,6 @@ fun MedicationEntity.toMedicamentoDataOrNull(): MedicamentoData? {
         unidadeDosagem = unidadeDosagem ?: return null,
         unidadeQuantidade = unidadeQuantidade ?: return null,
         horarioDose = HorarioDose.normalizar(horarioDose) ?: return null,
-        estoque = estoque,
         observacoes = observacoes,
         userId = userId
     )

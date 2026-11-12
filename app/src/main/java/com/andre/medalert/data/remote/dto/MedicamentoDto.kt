@@ -9,8 +9,7 @@ import com.google.gson.annotations.SerializedName
  *
  * - dosagem é Double: a API recebe Number e o paciente pode usar 0.5 ou 2.5 (o Gson envia 50.0 para 50).
  * - horario_dose vai como "HH:mm" (ver HorarioDose).
- * - estoque e observacoes fazem parte do contrato testado; a tela de cadastro ainda não os
- *   preenche, mas ficam aqui para não se perderem na sincronização.
+ * - observacoes é opcional; não há controle de estoque no contrato atual.
  * Datas: o repositório converte para ISO UTC (ex.: 2026-10-28T00:00:00.000Z) antes de enviar.
  */
 data class MedicamentoData(
@@ -24,7 +23,6 @@ data class MedicamentoData(
     @SerializedName("unidade_quantidade") val unidadeQuantidade: String,
     @SerializedName("usuario_id") val userId: Int,
     @SerializedName("horario_dose") val horarioDose: String? = null,
-    @SerializedName("estoque") val estoque: Int? = null,
     @SerializedName("observacoes") val observacoes: String? = null
 )
 
@@ -51,8 +49,6 @@ data class MedicamentoResponse(
     @SerializedName("frequencia") val frequencia: Int? = null,
     @SerializedName("data_inicio") val dataInicio: String? = null,
     @SerializedName("data_fim") val dataFim: String? = null,
-    @SerializedName("estoque") val estoque: Int? = null,
-    @SerializedName("estoque_minimo") val estoqueMinimo: Int? = null,
     @SerializedName("observacoes") val observacoes: String? = null,
     @SerializedName("ativo") val ativo: Boolean? = null,
     @SerializedName("horario_dose") val horarioDose: String? = null

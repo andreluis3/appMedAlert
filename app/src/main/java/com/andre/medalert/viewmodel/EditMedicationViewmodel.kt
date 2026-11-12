@@ -10,7 +10,6 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.local.AppDatabase
 import com.andre.medalert.data.local.entity.MedicationEntity
-import com.andre.medalert.data.local.entity.estoqueAtual
 import com.andre.medalert.data.mapper.toIsoUtc
 import com.andre.medalert.data.repository.MedicationRepository
 import kotlinx.coroutines.flow.MutableStateFlow

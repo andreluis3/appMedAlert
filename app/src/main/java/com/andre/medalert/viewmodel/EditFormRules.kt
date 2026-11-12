@@ -1,7 +1,6 @@
 package com.andre.medalert.viewmodel
 
 import com.andre.medalert.data.local.entity.MedicationEntity
-import com.andre.medalert.data.local.entity.estoqueAtual
 import com.andre.medalert.data.mapper.toIsoUtc
 import com.andre.medalert.ui.screens.meds.parseDecimalOrNull
 import java.math.BigDecimal
@@ -19,8 +18,6 @@ data class EditForm(
     val frequenciaHoras: Int? = null,
     val dataInicio: String? = null,
     val dataFim: String? = null,
-    val estoque: String = "",
-    val estoqueMinimo: String = "",
     val observacoes: String = "",
     val ativo: Boolean = true
 )
@@ -51,9 +48,6 @@ internal fun MedicationEntity.toEditForm(): EditForm {
         frequenciaHoras = frequencia,
         dataInicio = dataInicio?.take(10)?.takeIf { DATA_ISO.matches(it) },
         dataFim = dataFim?.take(10)?.takeIf { DATA_ISO.matches(it) },
-        // Estoque ATUAL (base menos o consumo local), é o que o usuário vê na lista.
-        estoque = estoqueAtual?.toString().orEmpty(),
-        estoqueMinimo = estoqueMinimo?.toString().orEmpty(),
         observacoes = observacoes.orEmpty(),
         ativo = ativo
     )
@@ -112,16 +106,6 @@ internal fun validate(o: EditForm, a: EditForm): String? {
         return "A data de fim não pode ser antes da data de início."
     }
 
-    if (a.estoque != o.estoque) {
-        // A API não aceita "limpar" o estoque: para zerar, o usuário informa 0.
-        val e = a.estoque.toIntOrNull()
-        if (e == null || e !in 0..1_000_000) return "Informe o estoque (use 0 para zerar)."
-    }
-    if (a.estoqueMinimo != o.estoqueMinimo) {
-        val m = a.estoqueMinimo.toIntOrNull()
-        if (m == null || m !in 0..1_000_000) return "Informe o estoque mínimo."
-    }
-
     if (a.observacoes.trim().length > 1000) return "As observações podem ter no máximo 1000 caracteres."
     return null
 }
@@ -151,8 +135,6 @@ internal fun buildChanges(o: EditForm, a: EditForm): Map<String, Any?> {
     if (a.dataInicio != o.dataInicio) c["data_inicio"] = a.dataInicio!!.toIsoUtc()
     if (a.dataFim != o.dataFim && a.dataFim != null) c["data_fim"] = a.dataFim.toIsoUtc()
 
-    if (a.estoque != o.estoque) c["estoque"] = a.estoque.toInt()
-    if (a.estoqueMinimo != o.estoqueMinimo) c["estoque_minimo"] = a.estoqueMinimo.toInt()
 
     // Observação apagada vai como texto vazio (null seria omitido e a API não mudaria nada).
     if (a.observacoes.trim() != o.observacoes.trim()) c["observacoes"] = a.observacoes.trim()

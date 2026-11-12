@@ -259,33 +259,6 @@ fun EditarMedicamentoScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        FieldLabel("Estoque")
-                        MedAlertTextField(
-                            value = form.estoque,
-                            onValueChange = { v ->
-                                viewModel.update { it.copy(estoque = v.filter(Char::isDigit)) }
-                            },
-                            placeholder = "",
-                            keyboardType = KeyboardType.Number
-                        )
-                    }
-                    Column(modifier = Modifier.weight(1f)) {
-                        FieldLabel("Estoque mínimo")
-                        MedAlertTextField(
-                            value = form.estoqueMinimo,
-                            onValueChange = { v ->
-                                viewModel.update { it.copy(estoqueMinimo = v.filter(Char::isDigit)) }
-                            },
-                            placeholder = "",
-                            keyboardType = KeyboardType.Number
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
                 FieldLabel("Observações")
                 MedAlertTextField(
                     value = form.observacoes,
