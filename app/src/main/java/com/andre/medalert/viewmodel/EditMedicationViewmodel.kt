@@ -78,13 +78,12 @@ class EditMedicationViewModel(
 
     private fun load() {
         viewModelScope.launch {
-            val entity = repository.getMedication(localId)
-            if (entity == null) {
-                _loadState.value = EditLoadState.Unavailable("Medicamento não encontrado.")
-                return@launch
-            }
-            repository.editBlockedReason(entity)?.let {
-                _loadState.value = EditLoadState.Unavailable(it)
+            // O repositório confere a permissão (paciente, ou cuidador com vínculo), se o
+            // medicamento é do paciente autorizado e se ele já tem remoteId.
+            val entity = repository.loadForEdit(localId).getOrElse { erro ->
+                _loadState.value = EditLoadState.Unavailable(
+                    erro.message ?: "Não foi possível abrir este medicamento."
+                )
                 return@launch
             }
             val inicial = entity.toEditForm()

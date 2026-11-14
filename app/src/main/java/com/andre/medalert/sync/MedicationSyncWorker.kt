@@ -65,7 +65,7 @@ class MedicationSyncWorker(
             val medicationRepository = MedicationRepository(db.medicationDao(), prefs)
             val historyRepository = HistoryRepository(db.doseHistoryDao())
 
-            // 2) Medicamentos pendentes (no-op para cuidador).
+            // 2) Medicamentos pendentes do paciente autorizado (paciente, ou cuidador vinculado).
             if (medicationRepository.syncPending().exceptionOrNull() is IOException) retry = true
 
             // 3) Lista de medicamentos atualizada.

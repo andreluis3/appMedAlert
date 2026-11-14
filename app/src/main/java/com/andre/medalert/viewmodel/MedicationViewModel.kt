@@ -11,8 +11,8 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
@@ -24,13 +24,17 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
         userPrefs = UserPreferencesRepository(application)
     )
 
-    // Quem chama informa o userId (vem do DataStore na MainActivity).
-    private val userId = MutableStateFlow<Int?>(null)
+    // ID do PACIENTE dono dos medicamentos (o próprio paciente, ou o vinculado ao cuidador).
+    // Quem chama informa (vem do PatientContext na MainActivity); nunca é o ID do cuidador.
+    private val patientId = MutableStateFlow<Int?>(null)
 
     // A tela observa SEMPRE o Room: quando o refresh grava na tabela, a lista atualiza sozinha.
+    // Sem paciente (logout, cuidador sem vínculo) a lista fica vazia, nunca com dados do anterior.
     @OptIn(ExperimentalCoroutinesApi::class)
-    val medications: StateFlow<List<MedicationEntity>> = userId
-        .flatMapLatest { id -> if (id == null) emptyFlow() else repository.observeMedications(id) }
+    val medications: StateFlow<List<MedicationEntity>> = patientId
+        .flatMapLatest { id ->
+            if (id == null) flowOf(emptyList()) else repository.observeMedications(id)
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _isRefreshing = MutableStateFlow(false)
@@ -39,15 +43,18 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error
 
-    /** Define o usuário e atualiza a lista a partir da API (sem apagar o que já está no Room). */
-    fun setUser(id: Int) {
-        if (userId.value == id) return
-        userId.value = id
-        refresh()
+    /**
+     * Define o paciente dono dos medicamentos e atualiza a lista a partir da API (sem apagar o que
+     * já está no Room). null = sem paciente: a lista esvazia e nada é buscado.
+     */
+    fun setPatient(id: Int?) {
+        if (patientId.value == id) return
+        patientId.value = id
+        if (id != null) refresh()
     }
 
     fun refresh() {
-        val id = userId.value ?: return
+        val id = patientId.value ?: return
         if (_isRefreshing.value) return // evita dois refresh ao mesmo tempo
         viewModelScope.launch {
             _isRefreshing.value = true

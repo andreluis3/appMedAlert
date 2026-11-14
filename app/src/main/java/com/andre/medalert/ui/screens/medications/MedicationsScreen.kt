@@ -44,8 +44,10 @@ fun MedicationsScreen(
     onEditClick: (Medication) -> Unit = {},
     // Chamado depois que o usuário confirma o diálogo de exclusão.
     onDeleteConfirm: (Medication) -> Unit = {},
-    // Cuidador: só consulta (sem adicionar, editar ou excluir). O Repository também bloqueia.
+    // Sem permissão para alterar (sem adicionar, editar ou excluir). O Repository também bloqueia.
     readOnly: Boolean = false,
+    // Cuidador com vínculo: gerencia os medicamentos DO PACIENTE (só muda os textos da tela).
+    managingForPatient: Boolean = false,
     // Cuidador sem paciente vinculado: mostra o aviso em vez de uma lista vazia sem explicação.
     awaitingLink: Boolean = false
 ) {
@@ -75,7 +77,11 @@ fun MedicationsScreen(
             Text("Medicamentos", color = MedAlertTextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                if (readOnly) "Medicamentos do paciente • somente consulta" else "Gerencie seus medicamentos",
+                when {
+                    readOnly -> "Medicamentos do paciente • somente consulta"
+                    managingForPatient -> "Gerencie os medicamentos do paciente"
+                    else -> "Gerencie seus medicamentos"
+                },
                 color = MedAlertTextSecondary,
                 fontSize = 14.sp
             )
@@ -96,7 +102,11 @@ fun MedicationsScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        if (readOnly) "O paciente ainda não tem medicamentos cadastrados" else "Nenhum medicamento cadastrado",
+                        if (readOnly || managingForPatient) {
+                            "O paciente ainda não tem medicamentos cadastrados"
+                        } else {
+                            "Nenhum medicamento cadastrado"
+                        },
                         color = MedAlertTextSecondary,
                         fontSize = 14.sp
                     )

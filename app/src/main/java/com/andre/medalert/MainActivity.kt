@@ -24,9 +24,10 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.andre.medalert.data.mapper.toMedication
-import com.andre.medalert.data.session.AccessPolicy
 import com.andre.medalert.fcm.InviteIntake
-import com.andre.medalert.ui.components.BlockForCaregiver
+import com.andre.medalert.ui.components.RequireMedicationAccess
+import com.andre.medalert.data.session.LinkState
+import com.andre.medalert.data.session.PatientContextProvider
 import com.andre.medalert.data.remote.SessionManager
 import com.andre.medalert.notification.MedicationReminderManager
 import com.andre.medalert.notification.NotificationHelper
@@ -337,22 +338,18 @@ class MainActivity : ComponentActivity() {
                         val medicationViewModel: MedicationViewModel =
                             viewModel()
 
-                        // Paciente: o próprio id. Cuidador: o paciente vinculado (nunca o id do cuidador).
-                        val session by userPreferences.session
+                        // Paciente dono dos dados: o próprio id, ou o paciente vinculado ao
+                        // cuidador (nunca o id do cuidador). Vem do PatientContext.
+                        val patientContext by remember { PatientContextProvider(userPreferences).context }
                             .collectAsState(initial = null)
 
-                        val patientId = session?.let {
-                            AccessPolicy.patientIdFor(it.tipo, it.userId, it.pacienteId)
-                        }
-                        val isCaregiver = session?.let { AccessPolicy.isCaregiver(it.tipo) } ?: false
-                        val awaitingLink = session?.let {
-                            AccessPolicy.isAwaitingLink(it.tipo, it.userId, it.pacienteId)
-                        } ?: false
+                        val patientId = patientContext?.patientId
+                        val canManage = patientContext?.canManageMedications ?: false
+                        val awaitingLink = patientContext?.linkState == LinkState.CAREGIVER_AWAITING_LINK
+                        val isCaregiver = patientContext?.isCaregiver ?: false
 
                         LaunchedEffect(patientId) {
-                            patientId?.let {
-                                medicationViewModel.setUser(it)
-                            }
+                            medicationViewModel.setPatient(patientId)
                         }
 
                         val medicationEntities by
@@ -381,18 +378,16 @@ class MainActivity : ComponentActivity() {
                             onDeleteConfirm = { medication ->
                                 medicationViewModel.deleteMedication(medication.localId)
                             },
-                            readOnly = isCaregiver,
+                            readOnly = !canManage,
+                            managingForPatient = canManage && isCaregiver,
                             awaitingLink = awaitingLink
                         )
                     }
 
                     // Cadastro de medicamento.
                     composable("cadastro_med") {
-                        // Cuidador é somente leitura: não cadastra medicamentos.
-                        BlockForCaregiver(
-                            onBlocked = { navController.popBackStack() },
-                            allowed = AccessPolicy::canCreateMedication
-                        ) {
+                        // Paciente e cuidador vinculado cadastram (para o paciente); cuidador sem vínculo volta.
+                        RequireMedicationAccess(onBlocked = { navController.popBackStack() }) {
                             CadastroMedScreen(
                                 onSuccess = {
                                     navController.navigate("home") {
@@ -421,8 +416,8 @@ class MainActivity : ComponentActivity() {
                         val medId =
                             backStackEntry.arguments?.getLong("medId") ?: 0L
 
-                        // Cuidador é somente leitura: não edita medicamentos.
-                        BlockForCaregiver(onBlocked = { navController.popBackStack() }) {
+                        // Paciente e cuidador vinculado editam; cuidador sem vínculo volta.
+                        RequireMedicationAccess(onBlocked = { navController.popBackStack() }) {
                             EditarMedicamentoScreen(
                                 localId = medId,
                                 // A lista observa o Room, então ao voltar já mostra os dados novos.

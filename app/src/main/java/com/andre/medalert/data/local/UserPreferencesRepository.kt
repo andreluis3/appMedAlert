@@ -10,6 +10,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.andre.medalert.data.model.PendingInvite
 import com.andre.medalert.data.model.PendingInviteCodec
 import com.andre.medalert.data.session.AccessPolicy
+import com.andre.medalert.data.session.LinkedPatientProfile
 import com.andre.medalert.data.session.SessionInfo
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -29,6 +30,8 @@ class UserPreferencesRepository(context: Context) {
         val USER_EMAIL = stringPreferencesKey("user_email")
         val FCM_REGISTERED = stringPreferencesKey("fcm_registered")
         val PENDING_INVITES = stringPreferencesKey("pending_invites")
+        val LINKED_PATIENT_ID = intPreferencesKey("linked_patient_id")
+        val LINKED_PATIENT_NAME = stringPreferencesKey("linked_patient_name")
     }
 
     val userId: Flow<Int?> = dataStore.data.map { it[Keys.USER_ID] }
@@ -61,6 +64,37 @@ class UserPreferencesRepository(context: Context) {
                 pacienteId = it[Keys.PACIENTE_ID]
             )
         }
+
+    /**
+     * Nome do paciente vinculado ao cuidador (cache local). Só vale junto com o id a que pertence:
+     * quem lê deve comparar com o vínculo atual (ver PatientContext.from).
+     */
+    val linkedPatientProfile: Flow<LinkedPatientProfile?> =
+        dataStore.data.map {
+            val id = it[Keys.LINKED_PATIENT_ID]
+            val name = it[Keys.LINKED_PATIENT_NAME]?.takeIf { nome -> nome.isNotBlank() }
+            if (id != null && id > 0 && name != null) LinkedPatientProfile(id, name) else null
+        }
+
+    /**
+     * Guarda o nome do paciente acompanhado. Só grava se a sessão é de cuidador, o [patientId] é
+     * o paciente vinculado agora e o nome não está em branco. Não mexe na sessão nem no vínculo.
+     * Some no logout ([clear]).
+     */
+    suspend fun saveLinkedPatientName(patientId: Int, name: String): Boolean {
+        val clean = name.trim()
+        if (patientId <= 0 || clean.isEmpty()) return false
+        var saved = false
+        dataStore.edit { prefs ->
+            val caregiverSession = (prefs[Keys.USER_ID] ?: 0) > 0 &&
+                    AccessPolicy.isCaregiver(prefs[Keys.USER_TYPE])
+            if (!caregiverSession || prefs[Keys.PACIENTE_ID] != patientId) return@edit
+            prefs[Keys.LINKED_PATIENT_ID] = patientId
+            prefs[Keys.LINKED_PATIENT_NAME] = clean
+            saved = true
+        }
+        return saved
+    }
 
     suspend fun saveSession(
         userId: Int,

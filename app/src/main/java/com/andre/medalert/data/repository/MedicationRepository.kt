@@ -38,12 +38,12 @@ private val cadastroMutex = Mutex()
 private val envioMutex = Mutex()
 
 /**
- * Cuidador não cadastra, edita nem exclui medicamentos (só consulta e registra administrações).
+ * Cuidador logado que ainda não tem paciente vinculado: não consulta nem altera medicamentos.
  * Este bloqueio fica na camada de dados (e não só nos botões da tela) para que nenhum caminho de
- * código altere medicamentos como cuidador. A API também deve recusar (403) esses pedidos.
+ * código altere medicamentos sem um paciente-dono válido. A API também deve recusar (403).
  */
-class CaregiverReadOnlyException :
-    Exception("Cuidadores só podem consultar os medicamentos do paciente. Alterações não são permitidas.")
+class NoLinkedPatientException :
+    Exception("Vincule-se a um paciente para gerenciar os medicamentos.")
 
 /** Resultado de um cadastro bem-sucedido. */
 enum class SaveOutcome {
@@ -59,18 +59,33 @@ enum class SaveOutcome {
  * A API só alimenta o Room (refresh) ou recebe o que foi salvo localmente.
  *
  * IDs:
- * - userId  = ID do paciente (listar e cadastrar).
- * - entity.id = ID LOCAL do Room (a tela usa só este).
+ * - patientId = ID do PACIENTE dono dos medicamentos (listar, cadastrar, conferir propriedade):
+ *   o próprio paciente, ou o paciente vinculado ao cuidador. NUNCA o ID do cuidador.
+ * - entity.userId = patientId do dono (é o `usuario_id` do POST /api/meds).
+ * - entity.id = ID LOCAL do Room (a tela usa só este; nunca vai para a API).
  * - entity.remoteId = ID do medicamento na API (editar e excluir).
+ *
+ * Quem pode alterar (cadastrar, editar, excluir): paciente, e cuidador COM vínculo válido, sempre
+ * sobre os medicamentos do paciente. Cuidador sem vínculo e sessão vazia: nada (AccessPolicy).
  *
  * Autenticação: o token JWT é anexado pelo interceptor do RetrofitClient. Um 401 numa rota
  * protegida já limpa a sessão e leva o usuário ao login; aqui só traduzimos a mensagem.
  */
 class MedicationRepository(
     private val dao: MedicationDao,
-    private val userPrefs: UserPreferencesRepository,
+    /** Foto atual da sessão: o DataStore em produção; uma função fixa nos testes. */
+    private val sessionProvider: suspend () -> SessionInfo,
     private val api: ApiService = RetrofitClient.instance
 ) {
+
+    constructor(
+        dao: MedicationDao,
+        userPrefs: UserPreferencesRepository,
+        api: ApiService = RetrofitClient.instance
+    ) : this(dao, { userPrefs.session.first() }, api)
+
+    /** Sessão autorizada a alterar medicamentos e o paciente dono deles. */
+    private class WriteAccess(val session: SessionInfo, val patientId: Int)
 
     /** Resultado interno de uma tentativa de envio de UM pendente. */
     private sealed class Envio {
@@ -91,21 +106,34 @@ class MedicationRepository(
     }
 
     /** A tela observa isto. Funciona sem internet. */
-    fun observeMedications(userId: Int): Flow<List<MedicationEntity>> =
-        dao.observeByUser(userId)
+    fun observeMedications(patientId: Int): Flow<List<MedicationEntity>> =
+        dao.observeByUser(patientId)
 
-    /** Lê um medicamento do Room pelo ID LOCAL (usado pela tela de edição). */
-    suspend fun getMedication(localId: Long): MedicationEntity? = dao.getById(localId)
+    /**
+     * Abre um medicamento (ID LOCAL do Room) para a tela de edição. Falha se a sessão não pode
+     * alterar medicamentos (cuidador sem vínculo, sem sessão), se o medicamento não existe, se ele
+     * é de OUTRO paciente que não o autorizado na sessão, ou se ainda não tem remoteId.
+     */
+    suspend fun loadForEdit(localId: Long): Result<MedicationEntity> {
+        val access = writeAccess().getOrElse { return Result.failure(it) }
+        val entity = dao.getById(localId)
+            ?: return Result.failure(Exception("Medicamento não encontrado."))
+        if (!podeAlterar(access.session, entity)) {
+            return Result.failure(Exception(NAO_PERTENCE_MESSAGE))
+        }
+        editBlockedReason(entity)?.let { return Result.failure(Exception(it)) }
+        return Result.success(entity)
+    }
 
     /** Motivo pelo qual o medicamento ainda não pode ser editado (sem remoteId), ou null se pode. */
-    fun editBlockedReason(entity: MedicationEntity): String? =
+    private fun editBlockedReason(entity: MedicationEntity): String? =
         if (entity.remoteId == null) semRemoteIdMessage(entity) else null
 
-    /** GET /api/meds/{userId} e atualiza o Room. Se falhar, o Room fica como está. */
-    suspend fun refresh(userId: Int): Result<Unit> =
+    /** GET /api/meds/{patientId} e atualiza o Room. Se falhar, o Room fica como está. */
+    suspend fun refresh(patientId: Int): Result<Unit> =
         try {
-            val remote = api.getMedicamentos(userId)
-            dao.replaceSynced(userId, remote.map { it.toEntity(userId) })
+            val remote = api.getMedicamentos(patientId)
+            dao.replaceSynced(patientId, remote.map { it.toEntity(patientId) })
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
@@ -116,7 +144,7 @@ class MedicationRepository(
 
     /** Atalho: atualiza a lista do PACIENTE da sessão (o próprio paciente, ou o vinculado ao cuidador). */
     suspend fun refreshForCurrentUser(): Result<Unit> {
-        val session = userPrefs.session.first()
+        val session = sessionProvider()
         val patientId = AccessPolicy.patientIdFor(session.tipo, session.userId, session.pacienteId)
 
         if (patientId == null) {
@@ -131,27 +159,33 @@ class MedicationRepository(
     }
 
     /**
-     * Sessão autorizada a executar a operação de escrita descrita por [permission]
-     * (cadastrar, editar ou excluir): só paciente logado.
-     * Cuidador recebe [CaregiverReadOnlyException]; sem sessão, "sessão expirada".
+     * Sessão autorizada a alterar medicamentos (cadastrar, editar, excluir) e o PACIENTE dono deles:
+     * paciente logado (ele mesmo) ou cuidador logado com paciente vinculado (o vinculado).
+     * Cuidador sem vínculo recebe [NoLinkedPatientException]; sem sessão, "sessão expirada".
      */
-    private suspend fun sessionForWrite(permission: (String?) -> Boolean): Result<SessionInfo> {
-        val session = userPrefs.session.first()
-        if (!permission(session.tipo)) {
-            return Result.failure(CaregiverReadOnlyException())
-        }
-        val userId = session.userId
-        if (userId == null || userId <= 0) {
-            return Result.failure(Exception("Sessão expirada. Faça login novamente."))
-        }
-        return Result.success(session)
+    private suspend fun writeAccess(): Result<WriteAccess> {
+        val session = sessionProvider()
+        val patientId = AccessPolicy.medicationOwnerIdFor(session.tipo, session.userId, session.pacienteId)
+        if (patientId != null) return Result.success(WriteAccess(session, patientId))
+        return Result.failure(
+            if (AccessPolicy.isAwaitingLink(session.tipo, session.userId, session.pacienteId)) {
+                NoLinkedPatientException()
+            } else {
+                Exception("Sessão expirada. Faça login novamente.")
+            }
+        )
     }
+
+    /** O medicamento pertence ao paciente autorizado da sessão (não ao cuidador, nem a outro paciente). */
+    private fun podeAlterar(session: SessionInfo, entity: MedicationEntity): Boolean =
+        AccessPolicy.canManageMedication(session.tipo, session.userId, session.pacienteId, entity.userId)
 
     /**
      * POST /api/meds (CadastroMedScreen).
      *
      * Fluxo:
-     * 1. O userId REAL vem do DataStore (o userId de [draft] é ignorado).
+     * 1. O dono REAL é o PACIENTE autorizado na sessão (o próprio, ou o vinculado ao cuidador); o
+     *    userId de [draft] é ignorado. Nada é gravado com o id do cuidador.
      * 2. Valida horário ("HH:mm") e dosagem (> 0, decimais permitidos).
      * 3. Grava no Room como pendente (isSynced = false). Se já existir um pendente idêntico
      *    (reenvio após falha), reaproveita a mesma linha em vez de criar outra.
@@ -164,9 +198,8 @@ class MedicationRepository(
      * - outros erros HTTP / inesperados: devolve erro, mas o registro continua no Room.
      */
     suspend fun saveMedicationForCurrentUser(draft: MedicamentoData): Result<SaveOutcome> {
-        val session = sessionForWrite(AccessPolicy::canCreateMedication)
-            .getOrElse { return Result.failure(it) }
-        val userId = session.userId ?: return Result.failure(Exception("Sessão expirada. Faça login novamente."))
+        val access = writeAccess().getOrElse { return Result.failure(it) }
+        val patientId = access.patientId
 
         if (!HorarioDose.ehHoraLocal(draft.horarioDose)) {
             return Result.failure(Exception("Informe um horário válido para a primeira dose."))
@@ -176,13 +209,13 @@ class MedicationRepository(
             return Result.failure(Exception("Informe uma dosagem válida."))
         }
 
-        val data = draft.copy(userId = userId)
+        val data = draft.copy(userId = patientId)
         val localId = cadastroMutex.withLock { localIdParaCadastro(data.toEntity()) }
 
         return when (val envio = envioMutex.withLock { enviarPendente(localId) }) {
             is Envio.Enviado -> {
                 // Traz da API os dados reais (horários etc.); se falhar, o registro já está salvo.
-                refresh(userId)
+                refresh(patientId)
                 Result.success(SaveOutcome.SYNCED)
             }
 
@@ -229,13 +262,12 @@ class MedicationRepository(
      * traz da API o que só ela calcula (ex.: horários). Em caso de erro da API, o Room NÃO muda.
      */
     suspend fun editMedication(localId: Long, changes: Map<String, Any?>): Result<Unit> {
-        val session = sessionForWrite(AccessPolicy::canEditMedication)
-            .getOrElse { return Result.failure(it) }
+        val access = writeAccess().getOrElse { return Result.failure(it) }
         if (changes.isEmpty()) return Result.success(Unit)
         val entity = dao.getById(localId)
             ?: return Result.failure(Exception("Medicamento não encontrado."))
-        if (entity.userId != session.userId) {
-            return Result.failure(Exception("Este medicamento não pertence à conta atual."))
+        if (!podeAlterar(access.session, entity)) {
+            return Result.failure(Exception(NAO_PERTENCE_MESSAGE))
         }
         val remoteId = entity.remoteId
             ?: return Result.failure(Exception(semRemoteIdMessage(entity)))
@@ -264,11 +296,10 @@ class MedicationRepository(
      * (criado offline), remove só localmente. 404 = já não existe no servidor: remove local também.
      */
     suspend fun deleteMedication(localId: Long): Result<Unit> {
-        val session = sessionForWrite(AccessPolicy::canDeleteMedication)
-            .getOrElse { return Result.failure(it) }
+        val access = writeAccess().getOrElse { return Result.failure(it) }
         val entity = dao.getById(localId) ?: return Result.success(Unit)
-        if (entity.userId != session.userId) {
-            return Result.failure(Exception("Este medicamento não pertence à conta atual."))
+        if (!podeAlterar(access.session, entity)) {
+            return Result.failure(Exception(NAO_PERTENCE_MESSAGE))
         }
         val remoteId = entity.remoteId
 
@@ -298,10 +329,11 @@ class MedicationRepository(
     }
 
     /**
-     * Reenvia os medicamentos pendentes (isSynced = false) DO USUÁRIO DA SESSÃO.
-     * Chamado pelo WorkManager.
+     * Reenvia os medicamentos pendentes (isSynced = false) do PACIENTE autorizado na sessão
+     * (o próprio paciente, ou o paciente vinculado ao cuidador). Chamado pelo WorkManager.
      *
-     * - Sem sessão: não há de quem sincronizar; devolve sucesso sem enviar nada.
+     * - Sem sessão ou cuidador sem vínculo: não há de quem sincronizar; devolve sucesso sem
+     *   enviar nada (os pendentes continuam no Room).
      * - Usa o mesmo [envioMutex] e a mesma função de envio do cadastro, então um medicamento
      *   que acabou de ser enviado pelo cadastro é reconhecido como já sincronizado e pulado.
      * - Só marca como sincronizado após receber um ID remoto válido.
@@ -309,18 +341,11 @@ class MedicationRepository(
      *   WorkManager tentar de novo); erros HTTP de um item não impedem os demais.
      */
     suspend fun syncPending(): Result<Unit> {
-        val session = userPrefs.session.first()
-        if (!AccessPolicy.canCreateMedication(session.tipo)) {
-            AppLog.w(TAG, "syncPending em sessão de cuidador: nada a enviar")
-            return Result.success(Unit)
-        }
-        val userId = session.userId
-        if (userId == null || userId <= 0) {
-            AppLog.w(TAG, "syncPending sem sessão: nada a sincronizar")
-            return Result.success(Unit)
-        }
+        val session = sessionProvider()
+        val patientId = AccessPolicy.medicationOwnerIdFor(session.tipo, session.userId, session.pacienteId)
+            ?: return Result.success(Unit)
 
-        val pendentes = dao.getUnsyncedByUser(userId)
+        val pendentes = dao.getUnsyncedByUser(patientId)
         if (pendentes.isEmpty()) {
             return Result.success(Unit)
         }
@@ -354,7 +379,7 @@ class MedicationRepository(
         }
 
         if (enviados > 0) {
-            refresh(userId) // traz horários etc.; se falhar, os registros já estão sincronizados
+            refresh(patientId) // traz horários etc.; se falhar, os registros já estão sincronizados
         }
 
         return when {
@@ -449,6 +474,10 @@ class MedicationRepository(
         } catch (e: Exception) {
             Envio.Falha(e)
         }
+    }
+
+    private companion object {
+        const val NAO_PERTENCE_MESSAGE = "Este medicamento não pertence ao paciente acompanhado."
     }
 
     private fun semRemoteIdMessage(entity: MedicationEntity): String =

@@ -42,6 +42,11 @@ android {
         jvmTarget = "11"
     }
 
+    testOptions {
+        // AppLog usa android.util.Log; sem isto os testes JVM do repositório falham ao logar.
+        unitTests.isReturnDefaultValues = true
+    }
+
     buildFeatures {
         compose = true
         // BuildConfig.DEBUG é usado para desligar logs de rede/dados em release.

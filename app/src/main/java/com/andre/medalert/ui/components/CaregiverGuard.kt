@@ -7,27 +7,30 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import com.andre.medalert.data.local.UserPreferencesRepository
-import com.andre.medalert.data.session.AccessPolicy
+import com.andre.medalert.data.session.PatientContextProvider
 
 /**
- * Protege rotas que alteram medicamentos (cadastro e edição). Cuidador não cadastra nem edita:
- * se chegar aqui (deep link, estado restaurado, bug de navegação), volta na hora.
- * [allowed] diz qual permissão a rota exige (padrão: editar). Enquanto a sessão ainda carrega,
- * não mostra nada. O Repository também bloqueia a gravação.
+ * Protege as rotas que alteram medicamentos (cadastro e edição). Quem pode: paciente logado e
+ * cuidador logado COM paciente vinculado (ver PatientContext.canManageMedications). Cuidador sem
+ * vínculo, ou sem sessão, que chegar aqui (deep link, estado restaurado, bug de navegação) volta
+ * na hora. Enquanto a sessão ainda carrega, não mostra nada. O Repository também bloqueia a gravação.
+ *
+ * Substitui o antigo BlockForCaregiver, que bloqueava todo cuidador só pelo tipo.
  */
 @Composable
-fun BlockForCaregiver(
+fun RequireMedicationAccess(
     onBlocked: () -> Unit,
-    allowed: (String?) -> Boolean = AccessPolicy::canEditMedication,
     content: @Composable () -> Unit
 ) {
     val context = LocalContext.current
-    val sessionFlow = remember { UserPreferencesRepository(context.applicationContext).session }
-    val session by sessionFlow.collectAsState(initial = null)
+    val provider = remember {
+        PatientContextProvider(UserPreferencesRepository(context.applicationContext))
+    }
+    val patientContext by provider.context.collectAsState(initial = null)
 
-    val current = session ?: return
+    val current = patientContext ?: return
 
-    if (allowed(current.tipo)) {
+    if (current.canManageMedications) {
         content()
     } else {
         LaunchedEffect(Unit) { onBlocked() }
