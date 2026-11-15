@@ -1,7 +1,6 @@
 package com.andre.medalert.data.session
 
 import android.content.Context
-import com.andre.medalert.data.local.AppDatabase
 import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.fcm.FcmTokenManager
 import com.andre.medalert.sync.MedicationSyncWorker
@@ -12,10 +11,12 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 /**
  * Reage às mudanças da sessão num lugar só (logout, 401, login e aceite de vínculo passam todos
  * pelo DataStore, então todos passam por aqui):
- * - sessão começou ou o vínculo mudou: sincroniza (e, para cuidador, registra o token FCM);
+ * - sessão começou ou o vínculo mudou: limpa o cache sincronizado de OUTRO paciente (se houver),
+ *   depois sincroniza (e, para cuidador, registra o token FCM);
  * - sessão terminou: invalida o token FCM, cancela a sincronização em fila e, no cuidador, limpa
  *   o cache do paciente neste aparelho. Registros ainda pendentes de envio NUNCA são apagados.
  *
+ * A ordem em [onSessionChanged] importa: a limpeza vem ANTES de enfileirar a sincronização.
  * Iniciado uma vez em [com.andre.medalert.MedAlertApplication].
  */
 object SessionLifecycle {
@@ -33,7 +34,7 @@ object SessionLifecycle {
                 when {
                     current.userId != null &&
                             (before?.userId != current.userId || before?.pacienteId != current.pacienteId) ->
-                        onSessionChanged(app)
+                        onSessionChanged(app, current)
 
                     before?.userId != null && current.userId == null -> onSessionEnded(app, before)
                 }
@@ -45,7 +46,11 @@ object SessionLifecycle {
         }
     }
 
-    private fun onSessionChanged(app: Context) {
+    private suspend fun onSessionChanged(app: Context, current: SessionInfo) {
+        // Outro login no mesmo aparelho, troca de paciente ou vínculo removido: some o cache
+        // sincronizado do dono anterior antes de qualquer nova sincronização.
+        SessionDataCleaner.reconcile(app, current)
+
         MedicationSyncWorker.schedulePeriodic(app)
         MedicationSyncWorker.enqueueFollowUp(app)
     }
@@ -54,11 +59,12 @@ object SessionLifecycle {
         MedicationSyncWorker.cancelQueued(app)
         FcmTokenManager.deleteToken()
 
+        // Cuidador: o cache é de OUTRA pessoa e não deve ficar no aparelho. Paciente: os dados
+        // são dele e não aparecem para ninguém; a limpeza acontece se OUTRO paciente entrar
+        // (reconcile), o que preserva o histórico quando ele só reloga (ex.: token expirado).
         if (AccessPolicy.isCaregiver(ended.tipo)) {
             val patientId = ended.pacienteId?.takeIf { it > 0 } ?: return
-            val db = AppDatabase.getInstance(app)
-            db.doseHistoryDao().deleteSyncedByUser(patientId)
-            db.medicationDao().deleteSyncedByUser(patientId)
+            SessionDataCleaner.purgeCaregiverCache(app, patientId)
         }
     }
 }

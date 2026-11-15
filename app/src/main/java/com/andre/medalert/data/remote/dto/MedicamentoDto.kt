@@ -9,7 +9,8 @@ import com.google.gson.annotations.SerializedName
  *
  * - dosagem é Double: a API recebe Number e o paciente pode usar 0.5 ou 2.5 (o Gson envia 50.0 para 50).
  * - horario_dose vai como "HH:mm" (ver HorarioDose).
- * - observacoes é opcional; não há controle de estoque no contrato atual.
+ * - observacoes é opcional. NÃO existe estoque no contrato: o banco do backend não tem essa coluna
+ *   (Prisma P2022), então nenhum campo de estoque pode ser enviado.
  * Datas: o repositório converte para ISO UTC (ex.: 2026-10-28T00:00:00.000Z) antes de enviar.
  */
 data class MedicamentoData(
@@ -27,11 +28,12 @@ data class MedicamentoData(
 )
 
 /**
- * Item do GET /api/meds/{usuarioId}. [id] é o ID DO MEDICAMENTO (necessário para editar/excluir).
+ * Item do GET /api/meds/{usuarioId} e de usuarios.medicamentos do GET /api/meds/cuid/{cuidadorId}.
+ * [id] é o ID DO MEDICAMENTO (necessário para editar/excluir).
  *
- * Os quatro primeiros campos são o contrato original (resumo). Os demais foram ACRESCENTADOS pelo
- * backend (GET completo) e são todos anuláveis: se o servidor for uma versão antiga e não mandar
- * algum deles, o app não quebra e o Room mantém o que já tinha (veja preservingDetailsFrom).
+ * Os quatro primeiros campos são o contrato original (resumo). Os demais são todos anuláveis:
+ * se o servidor não mandar algum deles (o /cuid/ manda só um subconjunto), o app não quebra e o
+ * Room mantém o que já tinha (veja preservingDetailsFrom).
  *
  * [dosagem] chega como String ("50" ou "50 mg"). dosagem_valor é Double (ex.: 500 ou 2.5); quando
  * ele não vier, o mapper extrai o número do texto de [dosagem].
@@ -52,6 +54,21 @@ data class MedicamentoResponse(
     @SerializedName("observacoes") val observacoes: String? = null,
     @SerializedName("ativo") val ativo: Boolean? = null,
     @SerializedName("horario_dose") val horarioDose: String? = null
+)
+
+/**
+ * GET /api/meds/cuid/{cuidadorId}: {"usuarios": {"nome": "...", "medicamentos": [...]}}.
+ * "usuarios" descreve o PACIENTE vinculado ao cuidador. Tudo anulável: uma resposta sem
+ * "usuarios" ou sem "medicamentos" é tratada como falha (o Room não é alterado).
+ */
+data class CuidadorMedicationResponse(
+    @SerializedName("usuarios") val usuarios: CuidadorDataDto? = null
+)
+
+/** [nome] é o nome do PACIENTE vinculado. [medicamentos] reaproveita [MedicamentoResponse]. */
+data class CuidadorDataDto(
+    @SerializedName("nome") val nome: String? = null,
+    @SerializedName("medicamentos") val medicamentos: List<MedicamentoResponse>? = null
 )
 
 /** Resposta do POST /api/meds (201): só nos interessa o id do medicamento criado. */

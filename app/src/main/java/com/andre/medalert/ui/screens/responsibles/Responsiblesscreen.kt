@@ -150,9 +150,7 @@ fun ResponsiblesScreen(
                         EmptyState(
                             icon = Icons.Filled.People,
                             title = "Nenhum responsável cadastrado.",
-                            message = "Adicione alguém de confiança para acompanhar seu tratamento.",
-                            actionLabel = "Adicionar responsável",
-                            onActionClick = onAddClick
+                            message = "Adicione alguém de confiança para acompanhar seu tratamento."
                         )
                     } else {
                         Column(

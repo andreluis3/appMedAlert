@@ -9,23 +9,12 @@ import com.andre.medalert.data.local.entity.DoseHistoryEntity
 import com.andre.medalert.data.local.entity.MedicationEntity
 import kotlinx.coroutines.flow.Flow
 
-/** Estoque do medicamento como está no Room (base, mínimo e consumo local). */
-data class StockSnapshot(
-    val estoque: Int?,
-    val estoqueMinimo: Int?,
-    val estoqueConsumido: Int
-)
-
 /**
  * Resultado de registrar uma dose tomada.
- * [inserted] = false: a dose já estava registrada (nada mudou, estoque inclusive).
- * Os campos de estoque são o estoque ATUAL (base - consumo) antes e depois; null = sem controle.
+ * [inserted] = false: a dose já estava registrada (nada mudou).
  */
 data class TakenInsertResult(
-    val inserted: Boolean,
-    val stockBefore: Int? = null,
-    val stockAfter: Int? = null,
-    val stockMinimum: Int? = null
+    val inserted: Boolean
 )
 
 @Dao
@@ -81,8 +70,8 @@ abstract class DoseHistoryDao {
     abstract suspend fun medicationsOf(userId: Int): List<MedicationEntity>
 
     /**
-     * Limpa o cache do paciente neste aparelho (logout do cuidador). Só remove o que já está no
-     * servidor (isSynced = 1): administrações pendentes de envio NUNCA são apagadas.
+     * Limpa o cache do paciente neste aparelho. Só remove o que já está no servidor
+     * (isSynced = 1): administrações pendentes de envio NUNCA são apagadas.
      */
     @Query("DELETE FROM dose_history WHERE userId = :userId AND isSynced = 1")
     abstract suspend fun deleteSyncedByUser(userId: Int): Int
@@ -127,34 +116,14 @@ abstract class DoseHistoryDao {
     )
     abstract suspend fun markSyncedByDose(medicationLocalId: Long, previstoEm: Long): Int
 
-    @Query(
-        "SELECT estoque, estoqueMinimo, estoqueConsumido FROM medications WHERE id = :medicationLocalId"
-    )
-    abstract suspend fun stockOf(medicationLocalId: Long): StockSnapshot?
-
-    /** Soma [quantity] ao consumo local, sem passar da base (estoque nunca fica negativo). */
-    @Query(
-        """
-        UPDATE medications
-        SET estoqueConsumido = MIN(estoqueConsumido + :quantity, estoque)
-        WHERE id = :medicationLocalId AND estoque IS NOT NULL
-        """
-    )
-    abstract suspend fun consumeStock(medicationLocalId: Long, quantity: Int): Int
-
     /**
-     * Registra a dose tomada E desconta o estoque, na MESMA transação.
-     * O desconto só acontece se a linha foi realmente inserida: o índice único
-     * (medicationLocalId, previstoEm) faz o insert devolver -1 em dose repetida, então a mesma
-     * dose nunca desconta duas vezes (toque duplo, duas notificações, reentrega do receiver).
+     * Registra a dose tomada, sem duplicar.
+     * Duas barreiras: a identidade REMOTA (medicamento remoto + horário previsto, ex.: dose que
+     * outro aparelho já registrou) e o índice único local (medicationLocalId, previstoEm), que
+     * faz o insert devolver -1 em dose repetida (toque duplo, duas notificações, reentrega).
      */
     @Transaction
-    open suspend fun insertTakenConsumingStock(
-        entity: DoseHistoryEntity,
-        quantity: Int
-    ): TakenInsertResult {
-        // Mesma dose já conhecida pelo ID REMOTO (ex.: veio do servidor, registrada por outro
-        // aparelho): não duplica e não desconta estoque de novo.
+    open suspend fun insertTaken(entity: DoseHistoryEntity): TakenInsertResult {
         val remoteMedicationId = entity.medicamentoId
         val scheduledAt = entity.previstoEm
         if (remoteMedicationId != null && scheduledAt != null &&
@@ -163,25 +132,6 @@ abstract class DoseHistoryDao {
             return TakenInsertResult(inserted = false)
         }
 
-        if (insertIgnore(entity) == -1L) return TakenInsertResult(inserted = false)
-
-        val medicationId = entity.medicationLocalId
-            ?: return TakenInsertResult(inserted = true)
-        val before = stockOf(medicationId)
-            ?: return TakenInsertResult(inserted = true)
-
-        if (before.estoque == null) {
-            return TakenInsertResult(inserted = true, stockMinimum = before.estoqueMinimo)
-        }
-
-        consumeStock(medicationId, quantity.coerceAtLeast(1))
-        val after = stockOf(medicationId)
-
-        return TakenInsertResult(
-            inserted = true,
-            stockBefore = (before.estoque - before.estoqueConsumido).coerceAtLeast(0),
-            stockAfter = after?.estoque?.let { (it - after.estoqueConsumido).coerceAtLeast(0) },
-            stockMinimum = before.estoqueMinimo
-        )
+        return TakenInsertResult(inserted = insertIgnore(entity) != -1L)
     }
 }

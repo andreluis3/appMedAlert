@@ -1,7 +1,6 @@
 package com.andre.medalert.data.mapper
 
 import com.andre.medalert.data.local.entity.MedicationEntity
-import com.andre.medalert.data.local.entity.estoqueAtual
 import com.andre.medalert.data.local.entity.horariosLista
 import com.andre.medalert.data.model.Medication
 
@@ -13,8 +12,7 @@ import com.andre.medalert.data.model.Medication
  * localId = id da linha no Room: é o que a tela devolve ao pedir editar/excluir.
  * O ID do backend (remoteId) NÃO sai do repository.
  *
- * Os horários vêm de [horariosLista] (doseDiaria do backend). Quando os alarmes forem
- * implementados, a fonte dos horários deve ser trocada AQUI/nessa função, sem mexer nas telas.
+ * Estoque não existe mais no Room: Medication.stock/stockMinimum ficam nulos (valor padrão).
  */
 fun MedicationEntity.toMedication(): Medication {
     val horarios = horariosLista()
@@ -36,8 +34,6 @@ fun MedicationEntity.toMedication(): Medication {
         endDate = dataFim,
         notes = observacoes,
         active = ativo,
-        localId = id,
-        stock = estoqueAtual,
-        stockMinimum = estoqueMinimo
+        localId = id
     )
 }

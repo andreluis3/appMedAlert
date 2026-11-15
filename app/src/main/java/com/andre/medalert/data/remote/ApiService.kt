@@ -6,9 +6,10 @@ import retrofit2.Response
 import retrofit2.http.*
 
 /**
- * Prefixo "api/" confirmado no Postman (ex.: https://dosy-xi.vercel.app/api/users/login).
+ * Base URL: https://dosy-production.up.railway.app/ (definida no RetrofitClient).
+ * Prefixo "api/" confirmado no Postman (ex.: .../api/users/login).
  * Rotas de /historys e /notification seguem o mesmo roteador; confirme no primeiro teste de cada uma.
- * NUNCA coloque o CRON_SECRET aqui: GET /api/notification é chamado só pelo cron da Vercel.
+ * NUNCA coloque o CRON_SECRET aqui: GET /api/notification é chamado só pelo cron.
  */
 interface ApiService {
 
@@ -41,9 +42,16 @@ interface ApiService {
 
     // ---------- Medicamentos ----------
 
-    // {usuarioId} = ID do PACIENTE.
+    // {usuarioId} = ID do PACIENTE. Só o paciente usa esta rota.
     @GET("api/meds/{usuarioId}")
     suspend fun getMedicamentos(@Path("usuarioId") usuarioId: Int): List<MedicamentoResponse>
+
+    // {cuidadorId} = ID do CUIDADOR logado (nunca o do paciente). Devolve o nome do paciente
+    // vinculado e os medicamentos dele: {"usuarios": {"nome": "...", "medicamentos": [...]}}.
+    @GET("api/meds/cuid/{cuidadorId}")
+    suspend fun getMedicamentosByCuidador(
+        @Path("cuidadorId") id: Int
+    ): CuidadorMedicationResponse
 
     // JSON flat em snake_case. 201 devolve o objeto criado (usamos só o id).
     @POST("api/meds")

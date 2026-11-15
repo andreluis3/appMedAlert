@@ -31,11 +31,15 @@ import java.util.concurrent.TimeUnit
  *
  * Ordem (cada passo depende do anterior):
  * 1. token FCM do cuidador (melhor esforço; não bloqueia o resto);
- * 2. medicamentos criados offline sobem (POST /api/meds) e ganham remoteId — só paciente;
- * 3. GET /api/meds/{pacienteId} atualiza o Room;
- * 4. administrações pendentes sobem (POST /api/historys) — paciente e cuidador; agora as doses
- *    que esperavam o remoteId do medicamento já podem seguir;
- * 5. GET doseDia reconcilia o dia de hoje no Room (traz o que o outro aparelho registrou).
+ * 2. medicamentos criados offline sobem (POST /api/meds) e ganham remoteId;
+ * 3. lista de medicamentos: o MedicationRepository escolhe a estratégia pela sessão
+ *    (paciente: GET /api/meds/{id}; cuidador: GET /api/meds/cuid/{cuidadorId});
+ * 4. administrações pendentes sobem (POST /api/historys) — paciente e cuidador;
+ * 5. GET doseDia reconcilia o dia de hoje no Room.
+ *
+ * O Worker NÃO tem regra de sincronização própria: não escolhe endpoint nem dono dos dados.
+ * Se a sessão mudar no meio da execução (logout, outro login, troca de vínculo), ele para sem
+ * gravar mais nada; o SessionLifecycle já enfileira uma nova execução para a sessão nova.
  *
  * Nada é apagado do Room. Só falhas de rede/servidor pedem nova tentativa; 4xx permanente
  * não entra em loop. Seguro de disparar várias vezes: os repositórios usam travas de processo.
@@ -67,9 +71,11 @@ class MedicationSyncWorker(
 
             // 2) Medicamentos pendentes do paciente autorizado (paciente, ou cuidador vinculado).
             if (medicationRepository.syncPending().exceptionOrNull() is IOException) retry = true
+            if (prefs.session.first() != session) return Result.success()
 
-            // 3) Lista de medicamentos atualizada.
-            if (medicationRepository.refresh(patientId).exceptionOrNull() is IOException) retry = true
+            // 3) Lista de medicamentos atualizada (estratégia escolhida pelo repositório).
+            if (medicationRepository.refreshForCurrentUser().exceptionOrNull() is IOException) retry = true
+            if (prefs.session.first() != session) return Result.success()
 
             // 4) Administrações pendentes.
             if (AccessPolicy.canRegisterDose(session.tipo, session.userId, session.pacienteId)) {
@@ -81,6 +87,7 @@ class MedicationSyncWorker(
                 )
                 if (outcome.shouldRetry) retry = true
             }
+            if (prefs.session.first() != session) return Result.success()
 
             // 5) Estado de hoje vindo do servidor.
             val medications = db.doseHistoryDao().medicationsOf(patientId)

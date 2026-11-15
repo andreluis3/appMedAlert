@@ -1,5 +1,6 @@
 package com.andre.medalert.data.repository
 
+import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.local.dao.MedicationDao
 import com.andre.medalert.data.local.entity.MedicationEntity
 import com.andre.medalert.data.mapper.HorarioDose
@@ -10,7 +11,7 @@ import com.andre.medalert.data.remote.ApiService
 import com.andre.medalert.data.remote.RetrofitClient
 import com.andre.medalert.data.remote.dto.EditMedicamentoRequest
 import com.andre.medalert.data.remote.dto.MedicamentoData
-import com.andre.medalert.data.local.UserPreferencesRepository
+import com.andre.medalert.data.remote.dto.MedicamentoResponse
 import com.andre.medalert.data.session.AccessPolicy
 import com.andre.medalert.data.session.SessionInfo
 import com.andre.medalert.util.AppLog
@@ -38,12 +39,27 @@ private val cadastroMutex = Mutex()
 private val envioMutex = Mutex()
 
 /**
+ * Chaves de estoque que NUNCA podem ir ao backend (a coluna não existe lá: Prisma P2022).
+ * Barreira extra: o formulário de edição já não monta essas chaves.
+ */
+private val CAMPOS_FORA_DO_CONTRATO = setOf(
+    "estoque", "estoque_minimo", "estoqueMinimo", "estoque_consumido", "estoqueConsumido"
+)
+
+/**
  * Cuidador logado que ainda não tem paciente vinculado: não consulta nem altera medicamentos.
  * Este bloqueio fica na camada de dados (e não só nos botões da tela) para que nenhum caminho de
  * código altere medicamentos sem um paciente-dono válido. A API também deve recusar (403).
  */
 class NoLinkedPatientException :
     Exception("Vincule-se a um paciente para gerenciar os medicamentos.")
+
+/**
+ * A sessão mudou (logout, outro login, troca de paciente) entre o início e o fim de uma
+ * sincronização. A resposta é descartada para não gravar dados de um paciente no outro.
+ */
+class StaleSessionException :
+    Exception("A sessão mudou durante a sincronização; os dados recebidos foram descartados.")
 
 /** Resultado de um cadastro bem-sucedido. */
 enum class SaveOutcome {
@@ -65,6 +81,11 @@ enum class SaveOutcome {
  * - entity.id = ID LOCAL do Room (a tela usa só este; nunca vai para a API).
  * - entity.remoteId = ID do medicamento na API (editar e excluir).
  *
+ * Sincronização (refresh):
+ * - paciente: GET /api/meds/{pacienteId};
+ * - cuidador: GET /api/meds/cuid/{cuidadorId} (usa o id do CUIDADOR só na URL; os medicamentos
+ *   são gravados com o id do PACIENTE vinculado) e guarda usuarios.nome como nome do paciente.
+ *
  * Quem pode alterar (cadastrar, editar, excluir): paciente, e cuidador COM vínculo válido, sempre
  * sobre os medicamentos do paciente. Cuidador sem vínculo e sessão vazia: nada (AccessPolicy).
  *
@@ -75,17 +96,31 @@ class MedicationRepository(
     private val dao: MedicationDao,
     /** Foto atual da sessão: o DataStore em produção; uma função fixa nos testes. */
     private val sessionProvider: suspend () -> SessionInfo,
-    private val api: ApiService = RetrofitClient.instance
+    private val api: ApiService = RetrofitClient.instance,
+    /** Guarda o nome do paciente vinculado (cuidador). No-op por padrão (testes). */
+    private val savePatientName: suspend (patientId: Int, name: String) -> Unit = { _, _ -> }
 ) {
 
     constructor(
         dao: MedicationDao,
         userPrefs: UserPreferencesRepository,
         api: ApiService = RetrofitClient.instance
-    ) : this(dao, { userPrefs.session.first() }, api)
+    ) : this(
+        dao,
+        { userPrefs.session.first() },
+        api,
+        { patientId, name -> userPrefs.saveLinkedPatientName(patientId, name) }
+    )
 
     /** Sessão autorizada a alterar medicamentos e o paciente dono deles. */
     private class WriteAccess(val session: SessionInfo, val patientId: Int)
+
+    /** O que o servidor devolveu, já independente de paciente/cuidador. */
+    private class RemoteSnapshot(
+        val medications: List<MedicamentoResponse>,
+        /** Nome do paciente (só vem no GET do cuidador). */
+        val patientName: String?
+    )
 
     /** Resultado interno de uma tentativa de envio de UM pendente. */
     private sealed class Envio {
@@ -129,11 +164,34 @@ class MedicationRepository(
     private fun editBlockedReason(entity: MedicationEntity): String? =
         if (entity.remoteId == null) semRemoteIdMessage(entity) else null
 
-    /** GET /api/meds/{patientId} e atualiza o Room. Se falhar, o Room fica como está. */
-    suspend fun refresh(patientId: Int): Result<Unit> =
-        try {
-            val remote = api.getMedicamentos(patientId)
-            dao.replaceSynced(patientId, remote.map { it.toEntity(patientId) })
+    /**
+     * Atualiza o Room com os medicamentos do paciente [patientId], pela estratégia da SESSÃO
+     * (paciente ou cuidador). Se falhar, o Room fica como está.
+     *
+     * Recusa ([StaleSessionException]) quando [patientId] não é o paciente da sessão atual, e
+     * descarta a resposta se a sessão mudou enquanto a requisição estava em andamento.
+     * Uma resposta sem "usuarios"/"medicamentos" (cuidador) é falha, nunca "lista vazia".
+     */
+    suspend fun refresh(patientId: Int): Result<Unit> {
+        val session = sessionProvider()
+        val owner = AccessPolicy.patientIdFor(session.tipo, session.userId, session.pacienteId)
+        if (owner == null || owner != patientId) {
+            return Result.failure(StaleSessionException())
+        }
+
+        return try {
+            val snapshot = fetchSnapshot(session, patientId)
+
+            // A resposta pode chegar depois de um logout ou de uma troca de vínculo.
+            val after = sessionProvider()
+            if (after.userId != session.userId ||
+                AccessPolicy.patientIdFor(after.tipo, after.userId, after.pacienteId) != patientId
+            ) {
+                return Result.failure(StaleSessionException())
+            }
+
+            dao.replaceSynced(patientId, entitiesFrom(snapshot, patientId))
+            snapshot.patientName?.let { rememberPatientName(patientId, it) }
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
@@ -141,6 +199,7 @@ class MedicationRepository(
             AppLog.w(TAG, "Falha ao atualizar a lista", e)
             Result.failure(e)
         }
+    }
 
     /** Atalho: atualiza a lista do PACIENTE da sessão (o próprio paciente, ou o vinculado ao cuidador). */
     suspend fun refreshForCurrentUser(): Result<Unit> {
@@ -156,6 +215,46 @@ class MedicationRepository(
         AppLog.d(TAG, "refreshForCurrentUser($patientId)")
 
         return refresh(patientId)
+    }
+
+    private suspend fun fetchSnapshot(session: SessionInfo, patientId: Int): RemoteSnapshot =
+        if (AccessPolicy.isCaregiver(session.tipo)) {
+            val cuidadorId = session.userId?.takeIf { it > 0 } ?: throw StaleSessionException()
+            val data = api.getMedicamentosByCuidador(cuidadorId).usuarios
+                ?: throw IllegalStateException("Resposta do cuidador sem 'usuarios'.")
+            val meds = data.medicamentos
+                ?: throw IllegalStateException("Resposta do cuidador sem 'medicamentos'.")
+            RemoteSnapshot(meds, data.nome)
+        } else {
+            RemoteSnapshot(api.getMedicamentos(patientId), null)
+        }
+
+    /**
+     * Resposta -> linhas do Room do PACIENTE. Quando a API não manda "ativo" (o GET do cuidador
+     * traz só um subconjunto), mantém o valor que o aparelho já tinha em vez de reativar.
+     */
+    private suspend fun entitiesFrom(snapshot: RemoteSnapshot, patientId: Int): List<MedicationEntity> {
+        val existing = if (snapshot.medications.any { it.ativo == null }) {
+            dao.getSyncedByUser(patientId).associateBy { it.remoteId }
+        } else {
+            emptyMap()
+        }
+
+        return snapshot.medications.map { item ->
+            val entity = item.toEntity(patientId)
+            val previous = item.id?.let { existing[it] }
+            if (item.ativo == null && previous != null) entity.copy(ativo = previous.ativo) else entity
+        }
+    }
+
+    private suspend fun rememberPatientName(patientId: Int, name: String) {
+        try {
+            savePatientName(patientId, name)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            AppLog.w(TAG, "Não foi possível guardar o nome do paciente", e)
+        }
     }
 
     /**
@@ -256,6 +355,7 @@ class MedicationRepository(
      * [changes] usa os nomes da API (snake_case), ex.: mapOf("nome" to "Novo", "frequencia" to 6),
      * e deve conter SÓ os campos alterados e NUNCA valores nulos (o Gson os omitiria).
      * "dosagem" pode ser Int ou Double (ex.: 2.5); o Room recebe como Double.
+     * Chaves de estoque são descartadas (o backend não tem essa coluna).
      *
      * Fluxo: 1) a API confirma; 2) o Room recebe as mesmas mudanças (id local e remoteId
      * preservados), então a lista já reflete a edição mesmo que o passo 3 falhe; 3) refresh
@@ -263,7 +363,8 @@ class MedicationRepository(
      */
     suspend fun editMedication(localId: Long, changes: Map<String, Any?>): Result<Unit> {
         val access = writeAccess().getOrElse { return Result.failure(it) }
-        if (changes.isEmpty()) return Result.success(Unit)
+        val safeChanges = changes.filterKeys { it !in CAMPOS_FORA_DO_CONTRATO }
+        if (safeChanges.isEmpty()) return Result.success(Unit)
         val entity = dao.getById(localId)
             ?: return Result.failure(Exception("Medicamento não encontrado."))
         if (!podeAlterar(access.session, entity)) {
@@ -272,12 +373,12 @@ class MedicationRepository(
         val remoteId = entity.remoteId
             ?: return Result.failure(Exception(semRemoteIdMessage(entity)))
 
-        val body = EditMedicamentoRequest(id = remoteId, data = changes)
+        val body = EditMedicamentoRequest(id = remoteId, data = safeChanges)
         return try {
             api.editMedicamento(body).close()
 
             // Relê a linha: um refresh pode ter rodado enquanto a requisição estava em andamento.
-            dao.getById(localId)?.let { dao.update(it.applyChanges(changes)) }
+            dao.getById(localId)?.let { dao.update(it.applyChanges(safeChanges)) }
 
             refresh(entity.userId) // se falhar, o Room já tem a edição; horários atualizam no próximo refresh
             Result.success(Unit)

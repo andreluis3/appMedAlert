@@ -120,6 +120,18 @@ class MedicationRepositoryAccessTest {
         override suspend fun deleteSyncedByUser(userId: Int) {
             rows.removeAll { it.userId == userId && it.isSynced }
         }
+
+        override suspend fun deleteSyncedByUserKeepingReferenced(
+            userId: Int,
+            referencedRemoteIds: List<Int>
+        ) {
+            rows.removeAll {
+                it.userId == userId &&
+                        it.isSynced &&
+                        it.remoteId != null &&
+                        it.remoteId !in referencedRemoteIds
+            }
+        }
     }
 
     /** Servidor em memória: guarda os medicamentos por paciente (usuario_id). */

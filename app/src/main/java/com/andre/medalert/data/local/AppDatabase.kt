@@ -16,7 +16,7 @@ import com.andre.medalert.data.local.entity.MedicationEntity
         MedicationEntity::class,
         DoseHistoryEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -219,6 +219,100 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 8 -> 9: remove estoque, estoqueMinimo e estoqueConsumido de medications.
+         *
+         * O backend não tem a coluna estoque e o app não usa estoque. SQLite não remove coluna
+         * de forma portável, então a tabela é recriada (mesmo padrão da migration 4 -> 5):
+         * copia TODAS as linhas com o mesmo id (pendentes inclusive, isSynced/remoteId intactos),
+         * apaga a antiga, renomeia a nova e recria o índice. Tudo na transação da migration.
+         * Também preserva o contador AUTOINCREMENT, para que o id local de um medicamento já
+         * excluído nunca seja reaproveitado (dose_history guarda medicationLocalId).
+         * Aborta antes de mexer em dados se alguma tabela tiver FOREIGN KEY para medications.
+         */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.query(
+                    "SELECT name FROM sqlite_master " +
+                            "WHERE type = 'table' AND name != 'medications' " +
+                            "AND sql LIKE '%REFERENCES%medications%'"
+                ).use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        throw IllegalStateException(
+                            "Migration 8->9 abortada: a tabela '${cursor.getString(0)}' tem " +
+                                    "FOREIGN KEY para medications; recriar medications poderia apagar dados."
+                        )
+                    }
+                }
+
+                val oldSeq: Long? = db.query(
+                    "SELECT seq FROM sqlite_sequence WHERE name = 'medications'"
+                ).use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else null }
+
+                db.execSQL("DROP TABLE IF EXISTS medications_new")
+
+                db.execSQL(
+                    """
+                    CREATE TABLE `medications_new` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `userId` INTEGER NOT NULL,
+                        `nome` TEXT NOT NULL,
+                        `dosagem` TEXT NOT NULL,
+                        `horarios` TEXT NOT NULL,
+                        `horario_dose` TEXT,
+                        `dataInicio` TEXT,
+                        `dataFim` TEXT,
+                        `dosagemValor` REAL,
+                        `frequencia` INTEGER,
+                        `quantidade` INTEGER,
+                        `unidadeDosagem` TEXT,
+                        `unidadeQuantidade` TEXT,
+                        `isSynced` INTEGER NOT NULL,
+                        `remoteId` INTEGER,
+                        `observacoes` TEXT,
+                        `ativo` INTEGER NOT NULL DEFAULT 1,
+                        `acompanhadoDesde` INTEGER
+                    )
+                    """.trimIndent()
+                )
+
+                db.execSQL(
+                    """
+                    INSERT INTO `medications_new` (
+                        `id`, `userId`, `nome`, `dosagem`, `horarios`, `horario_dose`,
+                        `dataInicio`, `dataFim`, `dosagemValor`, `frequencia`, `quantidade`,
+                        `unidadeDosagem`, `unidadeQuantidade`, `isSynced`, `remoteId`,
+                        `observacoes`, `ativo`, `acompanhadoDesde`
+                    )
+                    SELECT
+                        `id`, `userId`, `nome`, `dosagem`, `horarios`, `horario_dose`,
+                        `dataInicio`, `dataFim`, `dosagemValor`, `frequencia`, `quantidade`,
+                        `unidadeDosagem`, `unidadeQuantidade`, `isSynced`, `remoteId`,
+                        `observacoes`, `ativo`, `acompanhadoDesde`
+                    FROM `medications`
+                    """.trimIndent()
+                )
+
+                db.execSQL("DROP TABLE `medications`")
+                db.execSQL("ALTER TABLE `medications_new` RENAME TO `medications`")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_medications_userId` ON `medications` (`userId`)"
+                )
+
+                if (oldSeq != null) {
+                    db.execSQL(
+                        "UPDATE sqlite_sequence SET seq = $oldSeq " +
+                                "WHERE name = 'medications' AND seq < $oldSeq"
+                    )
+                    db.execSQL(
+                        "INSERT INTO sqlite_sequence (name, seq) SELECT 'medications', $oldSeq " +
+                                "WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'medications')"
+                    )
+                }
+            }
+        }
+
+
         /** Todas as migrations, na ordem. Usada pelo app e pelos testes de migração. */
         val ALL_MIGRATIONS: Array<Migration> = arrayOf(
             MIGRATION_2_3,
@@ -226,7 +320,8 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_4_5,
             MIGRATION_5_6,
             MIGRATION_6_7,
-            MIGRATION_7_8
+            MIGRATION_7_8,
+            MIGRATION_8_9
         )
 
         fun getInstance(context: Context): AppDatabase =

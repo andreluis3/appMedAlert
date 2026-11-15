@@ -32,6 +32,9 @@ class UserPreferencesRepository(context: Context) {
         val PENDING_INVITES = stringPreferencesKey("pending_invites")
         val LINKED_PATIENT_ID = intPreferencesKey("linked_patient_id")
         val LINKED_PATIENT_NAME = stringPreferencesKey("linked_patient_name")
+
+        /** Paciente cujos dados sincronizados estão em cache no Room. Sobrevive ao logout de propósito. */
+        val LOCAL_DATA_OWNER = intPreferencesKey("local_data_owner")
     }
 
     val userId: Flow<Int?> = dataStore.data.map { it[Keys.USER_ID] }
@@ -79,7 +82,7 @@ class UserPreferencesRepository(context: Context) {
     /**
      * Guarda o nome do paciente acompanhado. Só grava se a sessão é de cuidador, o [patientId] é
      * o paciente vinculado agora e o nome não está em branco. Não mexe na sessão nem no vínculo.
-     * Some no logout ([clear]).
+     * Some no logout ([clearSession]).
      */
     suspend fun saveLinkedPatientName(patientId: Int, name: String): Boolean {
         val clean = name.trim()
@@ -140,7 +143,7 @@ class UserPreferencesRepository(context: Context) {
         }
     }
 
-    /** "<cuidadorId>:<token>" já enviado à API; evita reenviar o mesmo token. Some no logout (clear). */
+    /** "<cuidadorId>:<token>" já enviado à API; evita reenviar o mesmo token. Some no logout (clearSession). */
     val fcmRegistered: Flow<String?> = dataStore.data.map { it[Keys.FCM_REGISTERED] }
 
     suspend fun saveFcmRegistered(marker: String) {
@@ -149,7 +152,7 @@ class UserPreferencesRepository(context: Context) {
 
     /**
      * Convites de vínculo recebidos pelo cuidador e ainda não tratados (mais recente primeiro).
-     * Chave própria: NÃO mexe na sessão ([saveSession] não toca nela) e some no logout ([clear]).
+     * Chave própria: NÃO mexe na sessão ([saveSession] não toca nela) e some no logout ([clearSession]).
      */
     val pendingInvites: Flow<List<PendingInvite>> =
         dataStore.data.map { PendingInviteCodec.decode(it[Keys.PENDING_INVITES]) }
@@ -190,6 +193,7 @@ class UserPreferencesRepository(context: Context) {
      * Grava SÓ o `paciente_id`: não toca em user_id, token, user_type, user_name, user_email nem
      * no marcador do FCM, e não faz logout. Na MESMA transação remove o convite pendente desse
      * paciente, então nunca existe um estado intermediário (vinculado, mas com o convite ainda lá).
+     * Se o paciente MUDOU, o nome guardado do paciente anterior é apagado na mesma transação.
      *
      * Devolve false, sem gravar nada, se o id for inválido ou a sessão não for de cuidador.
      * Quem observa a sessão (Home, Medicamentos, SessionLifecycle) reage sozinho à mudança.
@@ -202,7 +206,13 @@ class UserPreferencesRepository(context: Context) {
                     AccessPolicy.isCaregiver(prefs[Keys.USER_TYPE])
             if (!caregiverSession) return@edit
 
+            val previousPatient = prefs[Keys.PACIENTE_ID]
             prefs[Keys.PACIENTE_ID] = pacienteId
+
+            if (previousPatient != pacienteId) {
+                prefs.remove(Keys.LINKED_PATIENT_ID)
+                prefs.remove(Keys.LINKED_PATIENT_NAME)
+            }
 
             val remaining = PendingInviteCodec.remove(
                 PendingInviteCodec.decode(prefs[Keys.PENDING_INVITES]),
@@ -218,7 +228,48 @@ class UserPreferencesRepository(context: Context) {
         return updated
     }
 
-    suspend fun clear() {
-        dataStore.edit { it.clear() }
+    // ---------------------------------------------------------------------------
+    // Dono dos dados em cache no Room
+    // ---------------------------------------------------------------------------
+
+    /** Paciente cujos dados sincronizados estão em cache no Room (null = nenhum). */
+    val localDataOwner: Flow<Int?> = dataStore.data.map { it[Keys.LOCAL_DATA_OWNER] }
+
+    /** Registra (ou, com null, esquece) de quem são os dados em cache. Não faz parte da sessão. */
+    suspend fun saveLocalDataOwner(patientId: Int?) {
+        dataStore.edit { prefs ->
+            if (patientId != null && patientId > 0) {
+                prefs[Keys.LOCAL_DATA_OWNER] = patientId
+            } else {
+                prefs.remove(Keys.LOCAL_DATA_OWNER)
+            }
+        }
     }
+
+    // ---------------------------------------------------------------------------
+    // Encerramento de sessão
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Encerra a sessão: remove id, token, tipo, paciente vinculado, nome, e-mail, marcador do FCM,
+     * convites pendentes e o nome do paciente acompanhado. NÃO apaga preferências gerais do app
+     * nem o marcador [localDataOwner] (a limpeza do Room usa esse marcador depois).
+     */
+    suspend fun clearSession() {
+        dataStore.edit { prefs ->
+            prefs.remove(Keys.USER_ID)
+            prefs.remove(Keys.TOKEN)
+            prefs.remove(Keys.USER_TYPE)
+            prefs.remove(Keys.PACIENTE_ID)
+            prefs.remove(Keys.USER_NAME)
+            prefs.remove(Keys.USER_EMAIL)
+            prefs.remove(Keys.FCM_REGISTERED)
+            prefs.remove(Keys.PENDING_INVITES)
+            prefs.remove(Keys.LINKED_PATIENT_ID)
+            prefs.remove(Keys.LINKED_PATIENT_NAME)
+        }
+    }
+
+    /** Compatibilidade (ex.: SessionManager no 401): igual a [clearSession]. */
+    suspend fun clear() = clearSession()
 }

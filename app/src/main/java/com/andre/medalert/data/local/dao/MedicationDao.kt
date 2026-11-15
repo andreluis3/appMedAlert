@@ -37,7 +37,7 @@ abstract class MedicationDao {
     )
     abstract suspend fun getUnsynced(): List<MedicationEntity>
 
-    /** Pendências (criadas offline ou ainda não confirmadas) do usuário da sessão, na ordem de criação. */
+    /** Pendências (criadas offline ou ainda não confirmadas) do paciente da sessão, na ordem de criação. */
     @Query(
         """
         SELECT * FROM medications
@@ -231,11 +231,33 @@ abstract class MedicationDao {
     )
 
     /**
+     * Limpeza de cache de um paciente que deixou de ser o dono dos dados deste aparelho.
+     * Remove só medicamentos JÁ sincronizados (o servidor tem cópia) e que NÃO são referenciados
+     * por uma dose ainda pendente de envio: sem isso a dose pendente perderia o medicamento
+     * (e o remoteId) de que precisa para subir. Pendentes (isSynced = 0) nunca são apagados.
+     * Devolve quantas linhas foram removidas.
+     */
+    @Query(
+        """
+        DELETE FROM medications
+        WHERE userId = :userId AND isSynced = 1
+          AND id NOT IN (
+              SELECT medicationLocalId FROM dose_history
+              WHERE isSynced = 0 AND medicationLocalId IS NOT NULL
+          )
+        """
+    )
+    abstract suspend fun deleteSyncedByUserKeepingReferenced(
+        userId: Int
+    ): Int
+
+    /**
      * Atualiza os medicamentos sincronizados com a lista recebida da API.
      *
      * Regras:
      * - Mesmo remoteId: mantém o ID local e preserva detalhes existentes.
      * - Novo remoteId: insere um novo registro.
+     * - remoteId repetido dentro da MESMA resposta: só o primeiro entra (evita linhas duplicadas).
      * - Medicamento ausente na API: remove o registro sincronizado.
      * - Medicamentos criados offline (isSynced = 0): não são alterados.
      */
@@ -251,7 +273,10 @@ abstract class MedicationDao {
             .filter { it.remoteId != null }
             .associateBy { it.remoteId }
 
-        val merged = entities.map { novo ->
+        val seen = HashSet<Int>()
+        val unique = entities.filter { it.remoteId == null || seen.add(it.remoteId) }
+
+        val merged = unique.map { novo ->
             novo.preservingDetailsFrom(
                 novo.remoteId?.let { remoteId ->
                     byRemoteId[remoteId]

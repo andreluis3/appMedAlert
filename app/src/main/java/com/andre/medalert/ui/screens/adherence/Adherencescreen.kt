@@ -648,21 +648,70 @@ private fun AdherenceProgressBar(
  * "23.6" -> "23,6%", "50.0" -> "50%", "22" -> "22%".
  * Não recalcula nada.
  */
-private fun formatPercent(raw: String): String {
-    val clean = raw.trim().removeSuffix("%")
-    val withoutZeroDecimal = clean.removeSuffix(".0")
-    return withoutZeroDecimal.replace('.', ',') + "%"
+/**
+ * Formata o percentual recebido da API para exibição.
+ *
+ * Exemplos:
+ * "23.6" -> "23,6%"
+ * "50.0" -> "50%"
+ * "22"   -> "22%"
+ * "null" -> "0%"
+ * ""     -> "0%"
+ */
+private fun formatPercent(raw: String?): String {
+    val value = raw
+        ?.trim()
+        ?.removeSuffix("%")
+        ?.toFloatOrNull()
+        ?.takeIf { it.isFinite() }
+        ?: return "0%"
+
+    val formatted = if (value % 1f == 0f) {
+        value.toInt().toString()
+    } else {
+        value.toString().replace('.', ',')
+    }
+
+    return "$formatted%"
 }
 
-/** Converte o percentual da API (String) em 0f..1f só para desenhar barras/arcos. */
-private fun percentToFraction(raw: String): Float {
-    val value = raw.trim().removeSuffix("%").toFloatOrNull() ?: 0f
+
+/**
+ * Converte o percentual da API em uma fração entre 0f e 1f.
+ *
+ * Valores inválidos ou nulos retornam 0f.
+ */
+private fun percentToFraction(raw: String?): Float {
+    val value = raw
+        ?.trim()
+        ?.removeSuffix("%")
+        ?.toFloatOrNull()
+        ?.takeIf { it.isFinite() }
+        ?: return 0f
+
     return (value / 100f).coerceIn(0f, 1f)
 }
 
-/** "segunda-feira" -> "Seg", "sábado" -> "Sáb". */
-private fun abbreviateWeekday(diaSem: String): String =
-    diaSem.trim().take(3).replaceFirstChar { it.uppercase() }
 
-private fun forgottenDosesLabel(qtd: Int): String =
-    if (qtd == 1) "1 dose esquecida" else "$qtd doses esquecidas"
+
+private fun abbreviateWeekday(diaSem: String?): String {
+    val normalized = diaSem
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+        ?: return "--"
+
+    return normalized
+        .take(3)
+        .replaceFirstChar { it.uppercase() }
+}
+
+/**
+ * Retorna o texto referente à quantidade de doses esquecidas.
+ */
+private fun forgottenDosesLabel(qtd: Int): String {
+    return if (qtd == 1) {
+        "1 dose esquecida"
+    } else {
+        "$qtd doses esquecidas"
+    }
+}

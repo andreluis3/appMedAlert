@@ -10,6 +10,8 @@ import com.andre.medalert.data.schedule.DoseScheduleCalculator
 import com.andre.medalert.data.schedule.SessionMedications
 import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.schedule.LocalAdherence
+import com.andre.medalert.data.session.LinkState
+import com.andre.medalert.data.session.PatientContextProvider
 import com.andre.medalert.data.schedule.SessionUser
 import com.andre.medalert.data.session.AccessPolicy
 import com.andre.medalert.notification.DoseIntakeRegistrar
@@ -58,12 +60,16 @@ data class HomeUiState(
     val nextDoseLabel: String = "Nenhuma dose prevista",
     val dosesToday: List<HomeDoseUi> = emptyList(),
     val upcomingTimes: List<String> = emptyList(),
+    val isCaregiver: Boolean = false,
     val medicationsToday: Int = 0,
     val adherenceLabel: String = "Sem dados",
     /** Cuidador sem paciente vinculado: a Home mostra o aviso em vez de uma tela vazia. */
     val awaitingLink: Boolean = false,
     /** Cuidador vinculado: ID do paciente acompanhado (a API não devolve o nome dele). */
-    val linkedPatientId: Int? = null
+    /** Cuidador vinculado: ID do paciente acompanhado. */
+    val linkedPatientId: Int? = null,
+    /** Cuidador vinculado: nome do paciente (vem de GET /api/meds/cuid/{id}); null até chegar. */
+    val linkedPatientName: String? = null
 )
 
 private val HORA_FORMAT = DateTimeFormatter.ofPattern("HH:mm")
@@ -120,14 +126,24 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** (aguardando vínculo, paciente vinculado). Atualiza sozinho quando o aceite grava o paciente_id. */
-    private val linkState: Flow<Pair<Boolean, Int?>> = prefs.session
-        .map { session ->
-            val linked = if (AccessPolicy.canViewLinkedPatient(session.tipo, session.pacienteId)) {
-                session.pacienteId
-            } else {
-                null
-            }
-            AccessPolicy.isAwaitingLink(session.tipo, session.userId, session.pacienteId) to linked
+    private data class LinkInfo(
+        val awaiting: Boolean,
+        val patientId: Int?,
+        val patientName: String?
+    )
+
+    /**
+     * (aguardando vínculo, paciente vinculado e nome). Vem do PatientContext, então muda sozinho
+     * no aceite, na troca de paciente (o nome antigo some), quando o nome chega do /cuid/ e no logout.
+     */
+    private val linkState: Flow<LinkInfo> = PatientContextProvider(prefs).context
+        .map { ctx ->
+            val linked = ctx.patientId?.takeIf { ctx.linkState == LinkState.CAREGIVER_LINKED }
+            LinkInfo(
+                awaiting = ctx.isAwaitingLink,
+                patientId = linked,
+                patientName = if (linked != null) ctx.patientName else null
+            )
         }
         .distinctUntilChanged()
 
@@ -139,7 +155,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         takenKeys.combine(linkState) { taken, link -> taken to link }
     ) { name, medications, now, adherenceLabel, (taken, link) ->
         build(name, medications, now, adherenceLabel, taken)
-            .copy(awaitingLink = link.first, linkedPatientId = link.second)
+            .copy(
+                awaitingLink = link.awaiting,
+                linkedPatientId = link.patientId,
+                linkedPatientName = link.patientName
+            )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
     init {
@@ -152,7 +172,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     return@collectLatest
                 }
                 // Offline-first: se falhar, a Home continua com o que já está no Room.
-                medicationRepository.refresh(patientId)
+                medicationRepository.refreshForCurrentUser()
                 val dashboard = runCatching { historyRepository.getDashboard(patientId) }.getOrNull()
                 adherence.value = if (dashboard != null && dashboard.dosesEsp > 0) {
                     formatPercent(dashboard.adesao)

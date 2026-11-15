@@ -55,6 +55,8 @@ import com.andre.medalert.ui.screens.splash.SplashScreen
 import com.andre.medalert.ui.theme.MedAlertTheme
 import com.andre.medalert.viewmodel.AdherenceViewModel
 import com.andre.medalert.viewmodel.MedicationViewModel
+import com.andre.medalert.data.repository.UserRepository
+import com.andre.medalert.data.session.SessionDataCleaner
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -155,9 +157,15 @@ class MainActivity : ComponentActivity() {
 
                 // Logout: limpa a sessão e retorna ao onboarding.
                 // Os alarmes do usuário saem sozinhos (o observador vê a sessão vazia).
+                // Logout: tenta enviar o que está pendente (com o token ainda válido), limpa só os
+                // dados de SESSÃO e volta ao onboarding. Alarmes, FCM e cache do cuidador saem
+                // sozinhos (SessionLifecycle/observadores veem a sessão vazia). Pendências ficam no Room.
                 val logout: () -> Unit = {
                     coroutineScope.launch {
-                        userPreferences.clear()
+                        UserRepository(
+                            userPreferences = userPreferences,
+                            beforeLogout = { SessionDataCleaner.flushPending(context) }
+                        ).logout()
 
                         navController.navigate("onboarding") {
                             popUpTo(0) {

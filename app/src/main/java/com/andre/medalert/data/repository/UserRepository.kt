@@ -27,7 +27,12 @@ class InvalidCredentialsException(message: String? = null) : Exception(message)
 
 class UserRepository(
     private val api: ApiService = RetrofitClient.instance,
-    private val userPreferences: UserPreferencesRepository
+    private val userPreferences: UserPreferencesRepository,
+    /**
+     * Executado ANTES de encerrar a sessão, ainda com o token válido (ex.: tentar enviar o que
+     * está pendente). Falha ou demora aqui nunca impede o logout.
+     */
+    private val beforeLogout: suspend () -> Unit = {}
 ) {
 
     val isLoggedIn: Flow<Boolean> = userPreferences.isLoggedIn
@@ -75,6 +80,9 @@ class UserRepository(
      * Aceita: {"id":1,"tipo":"paciente"}, {"id":3,"tipo":"cuidador","pacienteId":1}
      * e, por compatibilidade, um número puro (ex.: 5), tratado como paciente.
      * 401 / corpo sem id -> InvalidCredentialsException. Outros erros vão em Result.failure.
+     *
+     * A limpeza de dados de OUTRO paciente (login de outra conta no mesmo aparelho) é feita pelo
+     * SessionLifecycle assim que a sessão muda.
      */
     suspend fun login(email: String, senha: String): Result<User> {
         return try {
@@ -118,8 +126,23 @@ class UserRepository(
         }
     }
 
+    /**
+     * Encerra a sessão:
+     * 1. [beforeLogout] (melhor esforço, com o token ainda válido): tenta enviar pendências;
+     * 2. limpa só os dados de SESSÃO do DataStore (preferências gerais ficam).
+     *
+     * O resto reage à sessão vazia no SessionLifecycle: cancela a sincronização, invalida o token
+     * FCM e limpa o cache do paciente do cuidador. Registros PENDENTES de envio nunca são apagados.
+     */
     suspend fun logout() {
-        userPreferences.clear()
+        try {
+            beforeLogout()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            AppLog.w("USER_REPO", "Falha ao enviar pendências antes do logout; encerrando mesmo assim", e)
+        }
+        userPreferences.clearSession()
     }
 
     /**

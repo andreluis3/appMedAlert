@@ -146,6 +146,14 @@ class HistoryRepository(
      * é o ID REMOTO (null se o medicamento ainda não foi sincronizado); o ID local nunca vai para
      * o campo remoto. [quantityPerDose] é a quantidade por dose do medicamento (mínimo 1).
      */
+    /**
+     * Registra no Room uma dose tomada pela notificação ou pela Home. `inserted = false` no
+     * resultado significa que essa dose (medicamento + horário previsto) já estava registrada.
+     *
+     * A linha fica com isSynced = false e é enviada depois por [syncPending]. [medicationRemoteId]
+     * é o ID REMOTO (null se o medicamento ainda não foi sincronizado); o ID local nunca vai para
+     * o campo remoto.
+     */
     suspend fun registerTakenLocally(
         userId: Int,
         medicationLocalId: Long,
@@ -154,7 +162,6 @@ class HistoryRepository(
         dosage: String,
         scheduledAtMillis: Long,
         takenAtMillis: Long,
-        quantityPerDose: Int = 1,
         origin: String? = null,
         registeredById: Int? = null
     ): TakenInsertResult {
@@ -170,7 +177,7 @@ class HistoryRepository(
             registeredById = registeredById,
             clientEventId = UUID.randomUUID().toString()
         )
-        return dao.insertTakenConsumingStock(entity, quantityPerDose)
+        return dao.insertTaken(entity)
     }
 
     /** true se essa dose (medicamento + horário previsto) já foi registrada. */

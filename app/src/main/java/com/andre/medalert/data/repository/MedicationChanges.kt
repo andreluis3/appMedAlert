@@ -41,8 +41,9 @@ internal fun MedicationEntity.applyChanges(c: Map<String, Any?>): MedicationEnti
     (c["data_fim"] as? String)?.let { e = e.copy(dataFim = mergeDate(e.dataFim, it)) }
     (c["horario_dose"] as? String)?.let { e = e.copy(horarioDose = HorarioDose.normalizar(it) ?: it) }
     // Estoque informado pelo usuário vira a nova BASE: o consumo local anterior deixa de valer.
-    if (c.containsKey("estoque")) e = e.copy(estoque = c.int("estoque"), estoqueConsumido = 0)
-    c.int("estoque_minimo")?.let { e = e.copy(estoqueMinimo = it) }
+
+    // Estoque removido do aplicativo.
+
     if (c.containsKey("observacoes")) e = e.copy(observacoes = c["observacoes"] as? String)
     (c["ativo"] as? Boolean)?.let { e = e.copy(ativo = it) }
     return e

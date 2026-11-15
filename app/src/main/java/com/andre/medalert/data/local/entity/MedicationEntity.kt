@@ -10,15 +10,15 @@ import androidx.room.PrimaryKey
  *
  * - id é LOCAL e autogerado.
  * - remoteId é o ID do medicamento no backend.
+ * - userId é SEMPRE o ID do PACIENTE dono (nunca o do cuidador).
  * - dosagem é o texto exibido ("2.5 mg"); dosagemValor é o número (Double, preserva decimais).
  * - dataInicio/dataFim armazenam as datas do tratamento.
  * - horarioDose armazena o horário inicial da primeira dose, SEMPRE em "HH:mm".
  * - horarios armazena a lista de horários retornada/calculada pelo backend.
- * - estoque é a BASE conhecida (servidor ou última edição do usuário); estoqueConsumido são as
- *   unidades descontadas LOCALMENTE por doses tomadas desde essa base. O estoque exibido é
- *   [estoqueAtual]. Assim um refresh da API não "devolve" o estoque já consumido no aparelho.
  * - acompanhadoDesde (epoch millis) é quando o aparelho passou a conhecer o medicamento; a adesão
  *   offline só conta doses a partir desse momento (sem cobrar doses de antes do uso do app).
+ *
+ * Não há controle de estoque: o backend não tem essa coluna.
  */
 @Entity(
     tableName = "medications",
@@ -50,22 +50,13 @@ data class MedicationEntity(
     val isSynced: Boolean = false,
     val remoteId: Int? = null,
 
-    val estoque: Int? = null,
-    val estoqueMinimo: Int? = null,
     val observacoes: String? = null,
 
     @ColumnInfo(defaultValue = "1")
     val ativo: Boolean = true,
 
-    @ColumnInfo(defaultValue = "0")
-    val estoqueConsumido: Int = 0,
-
     val acompanhadoDesde: Long? = null
 )
-
-/** Estoque que o usuário realmente tem: base menos o consumo local (nunca negativo). */
-val MedicationEntity.estoqueAtual: Int?
-    get() = estoque?.let { (it - estoqueConsumido).coerceAtLeast(0) }
 
 /**
  * Converte a coluna de horários em uma lista.
@@ -84,23 +75,17 @@ private fun String.normalizado(): String =
         .replace(Regex("\\s+"), " ")
 
 /**
- * Mantém a hora local antiga quando a API devolve a mesma data.
- *
- * Compatibilidade com registros antigos que guardavam a hora em dataInicio.
+ * Mantém a hora local antiga quando a API devolve a mesma data (registros antigos guardavam a
+ * hora em dataInicio) e mantém o valor local quando a API não mandou o campo (o GET do cuidador
+ * não traz data_inicio/data_fim).
  */
 private fun mantemHoraLocal(
     api: String?,
     local: String?
-): String? {
-    return if (
-        api != null &&
-        local != null &&
-        api.take(10) == local.take(10)
-    ) {
-        local
-    } else {
-        api
-    }
+): String? = when {
+    api == null -> local
+    local != null && api.take(10) == local.take(10) -> local
+    else -> api
 }
 
 /**
@@ -119,15 +104,6 @@ fun MedicationEntity.preservingDetailsFrom(
     // Medicamento novo neste aparelho: o acompanhamento da adesão começa agora.
     if (previous == null) return copy(acompanhadoDesde = acompanhadoDesde ?: nowMillis)
 
-    // Se o servidor mandou um estoque DIFERENTE do que o aparelho tinha como base, o servidor
-    // mudou a base (edição em outro aparelho, por exemplo): o consumo local deixa de valer.
-    // Se o estoque é o mesmo (ou não veio), o consumo local continua descontando.
-    val consumoLocal =
-        if (estoque != null && previous.estoque != null && estoque != previous.estoque) {
-            0
-        } else {
-            previous.estoqueConsumido
-        }
     val desde = previous.acompanhadoDesde ?: acompanhadoDesde ?: nowMillis
 
     val dosagemConfere =
@@ -139,26 +115,17 @@ fun MedicationEntity.preservingDetailsFrom(
     if (frequencia != null) {
         return copy(
             id = previous.id,
-            estoqueConsumido = consumoLocal,
             acompanhadoDesde = desde,
 
             horarios = horarios.ifBlank { previous.horarios },
             horarioDose = horarioDose ?: previous.horarioDose,
 
-            dataInicio = mantemHoraLocal(
-                dataInicio,
-                previous.dataInicio
-            ),
-            dataFim = mantemHoraLocal(
-                dataFim,
-                previous.dataFim
-            ),
+            dataInicio = mantemHoraLocal(dataInicio, previous.dataInicio),
+            dataFim = mantemHoraLocal(dataFim, previous.dataFim),
 
             quantidade = quantidade ?: previous.quantidade,
             unidadeQuantidade = unidadeQuantidade ?: previous.unidadeQuantidade,
 
-            estoque = estoque ?: previous.estoque,
-            estoqueMinimo = estoqueMinimo ?: previous.estoqueMinimo,
             observacoes = observacoes ?: previous.observacoes,
 
             dosagemValor = dosagemValor
@@ -172,7 +139,6 @@ fun MedicationEntity.preservingDetailsFrom(
     // Resposta resumida da API.
     return copy(
         id = previous.id,
-        estoqueConsumido = consumoLocal,
         acompanhadoDesde = desde,
 
         dataInicio = previous.dataInicio,
@@ -185,8 +151,6 @@ fun MedicationEntity.preservingDetailsFrom(
         quantidade = quantidade ?: previous.quantidade,
         unidadeQuantidade = unidadeQuantidade ?: previous.unidadeQuantidade,
 
-        estoque = estoque ?: previous.estoque,
-        estoqueMinimo = estoqueMinimo ?: previous.estoqueMinimo,
         observacoes = observacoes ?: previous.observacoes,
 
         ativo = previous.ativo,

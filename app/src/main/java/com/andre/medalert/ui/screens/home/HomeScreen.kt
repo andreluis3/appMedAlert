@@ -115,8 +115,9 @@ fun HomeScreen(
                 return@Column
             }
 
-            state.linkedPatientId?.let { linkedId ->
-                LinkedPatientBanner(patientId = linkedId)
+            // Cuidador vinculado: identifica o paciente acompanhado.
+            if (state.linkedPatientId != null) {
+                LinkedPatientBanner(patientName = state.linkedPatientName)
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
@@ -170,20 +171,26 @@ fun HomeScreen(
                     label = "Adesão ao tratamento",
                     onClick = onAdherenceClick
                 )
-                StatCard(
-                    modifier = Modifier.weight(1f),
-                    icon = Icons.Filled.People,
-                    value = "—",
-                    label = "Responsáveis",
-                    onClick = onResponsiblesClick
-                )
+                if (!state.isCaregiver) {
+                    StatCard(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Filled.People,
+                        value = "—",
+                        label = "Responsáveis",
+                        onClick = onResponsiblesClick
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun HomeHeader(userName: String?, subtitle: String, onBellClick: () -> Unit) {
+private fun HomeHeader(
+    userName: String?,
+    subtitle: String,
+    onBellClick: () -> Unit
+) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -220,7 +227,9 @@ private fun HomeHeader(userName: String?, subtitle: String, onBellClick: () -> U
             fontSize = 22.sp,
             fontWeight = FontWeight.Bold
         )
+
         Spacer(modifier = Modifier.height(4.dp))
+
         Text(
             text = subtitle,
             color = MedAlertTextSecondary,
@@ -229,9 +238,9 @@ private fun HomeHeader(userName: String?, subtitle: String, onBellClick: () -> U
     }
 }
 
-/** Cuidador vinculado: deixa claro de quem são os dados. O nome do paciente não existe na API. */
+/** Cuidador vinculado: deixa claro de quem são os dados. O nome vem do GET /api/meds/cuid/. */
 @Composable
-private fun LinkedPatientBanner(patientId: Int) {
+private fun LinkedPatientBanner(patientName: String?) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -257,12 +266,18 @@ private fun LinkedPatientBanner(patientId: Int) {
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = "Acompanhando o paciente #$patientId",
+                text = if (patientName.isNullOrBlank()) "Monitorando seu paciente"
+                else "Monitorando: $patientName",
                 color = MedAlertTextPrimary,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold
             )
-            Text("Vínculo ativo", color = MedAlertStatusGreen, fontSize = 12.sp)
+
+            Text(
+                text = "Vínculo ativo",
+                color = MedAlertStatusGreen,
+                fontSize = 12.sp
+            )
         }
     }
 }
@@ -290,6 +305,7 @@ private fun MedicationDoseRow(dose: HomeDoseUi, onRegister: () -> Unit) {
         dose.isPast -> MedAlertTextSecondary
         else -> MedAlertPrimary
     }
+
     val iconBackground = when {
         dose.isTaken -> MedAlertStatusGreen.copy(alpha = 0.15f)
         dose.isPast -> MedAlertBackground
@@ -320,8 +336,18 @@ private fun MedicationDoseRow(dose: HomeDoseUi, onRegister: () -> Unit) {
         Spacer(modifier = Modifier.width(12.dp))
 
         Column(modifier = Modifier.weight(1f)) {
-            Text(dose.medicationName, color = MedAlertTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            Text(dose.dosage, color = MedAlertTextSecondary, fontSize = 12.sp)
+            Text(
+                dose.medicationName,
+                color = MedAlertTextPrimary,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Text(
+                dose.dosage,
+                color = MedAlertTextSecondary,
+                fontSize = 12.sp
+            )
         }
 
         Column(horizontalAlignment = Alignment.End) {
@@ -331,6 +357,7 @@ private fun MedicationDoseRow(dose: HomeDoseUi, onRegister: () -> Unit) {
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold
             )
+
             if (dose.isTaken) {
                 Text(
                     text = "Tomado",
@@ -371,10 +398,28 @@ private fun StatCard(
             )
             .padding(16.dp)
     ) {
-        Icon(icon, contentDescription = null, tint = MedAlertPrimary, modifier = Modifier.size(20.dp))
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MedAlertPrimary,
+            modifier = Modifier.size(20.dp)
+        )
+
         Spacer(modifier = Modifier.height(10.dp))
-        Text(value, color = MedAlertTextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+
+        Text(
+            value,
+            color = MedAlertTextPrimary,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold
+        )
+
         Spacer(modifier = Modifier.height(2.dp))
-        Text(label, color = MedAlertTextSecondary, fontSize = 12.sp)
+
+        Text(
+            label,
+            color = MedAlertTextSecondary,
+            fontSize = 12.sp
+        )
     }
 }
