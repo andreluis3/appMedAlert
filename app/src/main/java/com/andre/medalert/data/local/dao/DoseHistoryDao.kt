@@ -11,10 +11,12 @@ import kotlinx.coroutines.flow.Flow
 
 /**
  * Resultado de registrar uma dose tomada.
- * [inserted] = false: a dose já estava registrada (nada mudou).
+ * [inserted] = false: a dose não foi gravada. Se [refused] = true, foi RECUSADA porque o
+ * medicamento pertence a outro paciente; se [refused] = false, a dose já estava registrada.
  */
 data class TakenInsertResult(
-    val inserted: Boolean
+    val inserted: Boolean,
+    val refused: Boolean = false
 )
 
 @Dao
@@ -76,7 +78,8 @@ abstract class DoseHistoryDao {
     @Query("DELETE FROM dose_history WHERE userId = :userId AND isSynced = 1")
     abstract suspend fun deleteSyncedByUser(userId: Int): Int
 
-    /** Pendentes de envio. Doses de medicamento excluído ficam de fora (o remoto já não existe). */
+    /** Pendentes de envio de TODOS os pacientes. O sync usa [getUnsyncedByUser]. */
+    @Deprecated("Mistura pacientes. Use getUnsyncedByUser(userId).")
     @Query("SELECT * FROM dose_history WHERE isSynced = 0 AND medicamentoRemovido = 0")
     abstract suspend fun getUnsynced(): List<DoseHistoryEntity>
 
@@ -91,8 +94,17 @@ abstract class DoseHistoryDao {
     abstract suspend fun getUnsyncedByUser(userId: Int): List<DoseHistoryEntity>
 
     /** ID REMOTO do medicamento (null se ainda não foi sincronizado ou se não existe mais). */
+    @Deprecated("Não confere o dono do medicamento. Use remoteIdOfForUser.")
     @Query("SELECT remoteId FROM medications WHERE id = :medicationLocalId")
     abstract suspend fun remoteIdOf(medicationLocalId: Long): Int?
+
+    /** ID REMOTO do medicamento, só se ele pertence ao paciente [userId]. */
+    @Query("SELECT remoteId FROM medications WHERE id = :medicationLocalId AND userId = :userId")
+    abstract suspend fun remoteIdOfForUser(medicationLocalId: Long, userId: Int): Int?
+
+    /** Paciente dono do medicamento local (null se o medicamento não existe mais). */
+    @Query("SELECT userId FROM medications WHERE id = :medicationLocalId")
+    abstract suspend fun medicationOwnerOf(medicationLocalId: Long): Int?
 
     @Insert
     abstract suspend fun insertAll(entities: List<DoseHistoryEntity>)
@@ -101,13 +113,19 @@ abstract class DoseHistoryDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     abstract suspend fun insertIgnore(entity: DoseHistoryEntity): Long
 
+    @Deprecated("Não confere o dono da linha. Use markSyncedForUser.")
     @Query("UPDATE dose_history SET isSynced = 1 WHERE id = :id")
     abstract suspend fun markSynced(id: Long)
+
+    /** Marca como sincronizada a dose [id], só se ela pertence ao paciente [userId]. */
+    @Query("UPDATE dose_history SET isSynced = 1 WHERE id = :id AND userId = :userId")
+    abstract suspend fun markSyncedForUser(id: Long, userId: Int): Int
 
     /**
      * Marca como sincronizada a dose local (medicamento + horário previsto) que o servidor
      * já informa como tomada. Evita reenviar um POST cuja resposta se perdeu.
      */
+    @Deprecated("Não confere o dono. Use markSyncedByDoseForUser.")
     @Query(
         """
         UPDATE dose_history SET isSynced = 1
@@ -116,14 +134,40 @@ abstract class DoseHistoryDao {
     )
     abstract suspend fun markSyncedByDose(medicationLocalId: Long, previstoEm: Long): Int
 
+    /** Igual a [markSyncedByDose], limitado às doses do paciente [userId]. */
+    @Query(
+        """
+        UPDATE dose_history SET isSynced = 1
+        WHERE userId = :userId AND medicationLocalId = :medicationLocalId
+          AND previstoEm = :previstoEm AND isSynced = 0
+        """
+    )
+    abstract suspend fun markSyncedByDoseForUser(
+        userId: Int,
+        medicationLocalId: Long,
+        previstoEm: Long
+    ): Int
+
     /**
      * Registra a dose tomada, sem duplicar.
-     * Duas barreiras: a identidade REMOTA (medicamento remoto + horário previsto, ex.: dose que
-     * outro aparelho já registrou) e o índice único local (medicationLocalId, previstoEm), que
-     * faz o insert devolver -1 em dose repetida (toque duplo, duas notificações, reentrega).
+     * Barreiras:
+     * 1. Dono: se o medicamento local existe e pertence a OUTRO paciente que não o da dose, a
+     *    dose é RECUSADA (refused = true) e nada é gravado.
+     * 2. Identidade REMOTA (medicamento remoto + horário previsto, ex.: dose que outro aparelho
+     *    já registrou).
+     * 3. Índice único local (medicationLocalId, previstoEm), que faz o insert devolver -1 em dose
+     *    repetida (toque duplo, duas notificações, reentrega).
      */
     @Transaction
     open suspend fun insertTaken(entity: DoseHistoryEntity): TakenInsertResult {
+        val localMedicationId = entity.medicationLocalId
+        if (localMedicationId != null) {
+            val owner = medicationOwnerOf(localMedicationId)
+            if (owner != null && owner != entity.userId) {
+                return TakenInsertResult(inserted = false, refused = true)
+            }
+        }
+
         val remoteMedicationId = entity.medicamentoId
         val scheduledAt = entity.previstoEm
         if (remoteMedicationId != null && scheduledAt != null &&

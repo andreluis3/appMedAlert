@@ -6,17 +6,23 @@ import com.andre.medalert.fcm.FcmTokenManager
 import com.andre.medalert.sync.MedicationSyncWorker
 import com.andre.medalert.util.AppLog
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.distinctUntilChangedBy
 
 /**
  * Reage às mudanças da sessão num lugar só (logout, 401, login e aceite de vínculo passam todos
  * pelo DataStore, então todos passam por aqui):
- * - sessão começou ou o vínculo mudou: limpa o cache sincronizado de OUTRO paciente (se houver),
- *   depois sincroniza (e, para cuidador, registra o token FCM);
- * - sessão terminou: invalida o token FCM, cancela a sincronização em fila e, no cuidador, limpa
- *   o cache do paciente neste aparelho. Registros ainda pendentes de envio NUNCA são apagados.
+ * - sessão começou ou a IDENTIDADE mudou (usuário, tipo ou paciente-alvo): limpa o cache
+ *   sincronizado de OUTRO paciente (se houver), depois sincroniza (e, para cuidador, registra o
+ *   token FCM);
+ * - sessão terminou: invalida o token FCM e cancela a sincronização em fila. Nenhum dado
+ *   clínico é apagado: os dados pertencem ao PACIENTE e continuam no Room (inclusive quando quem
+ *   saiu foi o cuidador). Quem enxerga o quê é decidido pela sessão: toda consulta filtra pelo
+ *   paciente da sessão, então o próximo login só vê o que o seu vínculo permite.
  *
  * A ordem em [onSessionChanged] importa: a limpeza vem ANTES de enfileirar a sincronização.
+ * Se a limpeza falhar, a sincronização é enfileirada mesmo assim: as telas só leem o paciente
+ * da sessão, então nada se mistura, e a limpeza é refeita na próxima abertura (o marcador de
+ * dono só é atualizado depois de limpar).
  * Iniciado uma vez em [com.andre.medalert.MedAlertApplication].
  */
 object SessionLifecycle {
@@ -25,46 +31,47 @@ object SessionLifecycle {
 
     suspend fun observe(context: Context) {
         val app = context.applicationContext
-        var previous: SessionInfo? = null
+        var previous: SessionIdentity? = null
 
-        UserPreferencesRepository(app).session.distinctUntilChanged().collect { current ->
-            val before = previous
-            previous = current
-            try {
-                when {
-                    current.userId != null &&
-                            (before?.userId != current.userId || before?.pacienteId != current.pacienteId) ->
-                        onSessionChanged(app, current)
-
-                    before?.userId != null && current.userId == null -> onSessionEnded(app, before)
+        UserPreferencesRepository(app).session
+            // Só muda o que importa: userId, tipo e paciente-alvo. Nome/e-mail/token não disparam nada.
+            .distinctUntilChangedBy { it.identity() }
+            .collect { current ->
+                val before = previous
+                val now = current.identity()
+                previous = now
+                try {
+                    when {
+                        now.userId != null -> onSessionChanged(app, current)
+                        before?.userId != null -> onSessionEnded(app)
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    AppLog.e(TAG, "Falha ao reagir à mudança de sessão", e)
                 }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                AppLog.e(TAG, "Falha ao reagir à mudança de sessão", e)
             }
-        }
     }
 
     private suspend fun onSessionChanged(app: Context, current: SessionInfo) {
-        // Outro login no mesmo aparelho, troca de paciente ou vínculo removido: some o cache
-        // sincronizado do dono anterior antes de qualquer nova sincronização.
-        SessionDataCleaner.reconcile(app, current)
+        // Outro login no mesmo aparelho, troca de tipo, troca de paciente ou vínculo removido:
+        // some o cache sincronizado do dono anterior antes de qualquer nova sincronização.
+        try {
+            SessionDataCleaner.reconcile(app, current)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            AppLog.e(TAG, "Falha ao reconciliar o cache local; a sincronização segue", e)
+        }
 
         MedicationSyncWorker.schedulePeriodic(app)
         MedicationSyncWorker.enqueueFollowUp(app)
     }
 
-    private suspend fun onSessionEnded(app: Context, ended: SessionInfo) {
+    private suspend fun onSessionEnded(app: Context) {
         MedicationSyncWorker.cancelQueued(app)
         FcmTokenManager.deleteToken()
-
-        // Cuidador: o cache é de OUTRA pessoa e não deve ficar no aparelho. Paciente: os dados
-        // são dele e não aparecem para ninguém; a limpeza acontece se OUTRO paciente entrar
-        // (reconcile), o que preserva o histórico quando ele só reloga (ex.: token expirado).
-        if (AccessPolicy.isCaregiver(ended.tipo)) {
-            val patientId = ended.pacienteId?.takeIf { it > 0 } ?: return
-            SessionDataCleaner.purgeCaregiverCache(app, patientId)
-        }
+        // Nada é apagado do Room (decisão do projeto): os dados são do paciente, e as pendências
+        // de envio também continuam salvas.
     }
 }

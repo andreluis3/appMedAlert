@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import androidx.datastore.preferences.core.MutablePreferences
 import com.andre.medalert.data.model.PendingInvite
 import com.andre.medalert.data.model.PendingInviteCodec
 import com.andre.medalert.data.session.AccessPolicy
@@ -255,19 +256,42 @@ class UserPreferencesRepository(context: Context) {
      * convites pendentes e o nome do paciente acompanhado. NÃO apaga preferências gerais do app
      * nem o marcador [localDataOwner] (a limpeza do Room usa esse marcador depois).
      */
+    /**
+     * Encerra a sessão: remove id, token, tipo, paciente vinculado, nome, e-mail, marcador do FCM,
+     * convites pendentes e o nome do paciente acompanhado. NÃO apaga preferências gerais do app
+     * nem o marcador [localDataOwner] (a limpeza do Room usa esse marcador depois).
+     */
     suspend fun clearSession() {
+        dataStore.edit { prefs -> removeSessionKeys(prefs) }
+    }
+
+    /**
+     * Encerra a sessão SÓ se ela ainda usa [token] (compara e limpa na mesma transação).
+     * Devolve true se limpou. Usado no 401: uma resposta tardia de uma sessão anterior não
+     * encerra a sessão nova, e vários 401 simultâneos limpam uma vez só.
+     * Sem sessão (nada a limpar) devolve false.
+     */
+    suspend fun clearSessionIfToken(token: String?): Boolean {
+        var cleared = false
         dataStore.edit { prefs ->
-            prefs.remove(Keys.USER_ID)
-            prefs.remove(Keys.TOKEN)
-            prefs.remove(Keys.USER_TYPE)
-            prefs.remove(Keys.PACIENTE_ID)
-            prefs.remove(Keys.USER_NAME)
-            prefs.remove(Keys.USER_EMAIL)
-            prefs.remove(Keys.FCM_REGISTERED)
-            prefs.remove(Keys.PENDING_INVITES)
-            prefs.remove(Keys.LINKED_PATIENT_ID)
-            prefs.remove(Keys.LINKED_PATIENT_NAME)
+            if (prefs[Keys.USER_ID] == null || prefs[Keys.TOKEN] != token) return@edit
+            removeSessionKeys(prefs)
+            cleared = true
         }
+        return cleared
+    }
+
+    private fun removeSessionKeys(prefs: MutablePreferences) {
+        prefs.remove(Keys.USER_ID)
+        prefs.remove(Keys.TOKEN)
+        prefs.remove(Keys.USER_TYPE)
+        prefs.remove(Keys.PACIENTE_ID)
+        prefs.remove(Keys.USER_NAME)
+        prefs.remove(Keys.USER_EMAIL)
+        prefs.remove(Keys.FCM_REGISTERED)
+        prefs.remove(Keys.PENDING_INVITES)
+        prefs.remove(Keys.LINKED_PATIENT_ID)
+        prefs.remove(Keys.LINKED_PATIENT_NAME)
     }
 
     /** Compatibilidade (ex.: SessionManager no 401): igual a [clearSession]. */

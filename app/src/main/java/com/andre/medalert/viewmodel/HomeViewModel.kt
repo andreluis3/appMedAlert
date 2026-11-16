@@ -129,7 +129,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private data class LinkInfo(
         val awaiting: Boolean,
         val patientId: Int?,
-        val patientName: String?
+        val patientName: String?,
+        val isCaregiver: Boolean
     )
 
     /**
@@ -142,7 +143,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             LinkInfo(
                 awaiting = ctx.isAwaitingLink,
                 patientId = linked,
-                patientName = if (linked != null) ctx.patientName else null
+                patientName = if (linked != null) ctx.patientName else null,
+                isCaregiver = ctx.isCaregiver
             )
         }
         .distinctUntilChanged()
@@ -156,6 +158,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     ) { name, medications, now, adherenceLabel, (taken, link) ->
         build(name, medications, now, adherenceLabel, taken)
             .copy(
+                isCaregiver = link.isCaregiver,
                 awaitingLink = link.awaiting,
                 linkedPatientId = link.patientId,
                 linkedPatientName = link.patientName

@@ -48,7 +48,14 @@ data class PatientContext(
 ) {
     val isCaregiver: Boolean get() = AccessPolicy.isCaregiver(tipo)
 
-    /** Cadastrar, editar e excluir medicamentos do [patientId]. Igual a [AccessPolicy.canManageMedications]. */
+    /** Cadastrar medicamento novo: só o paciente. Igual a [AccessPolicy.canAddMedications]. */
+    val canAddMedications: Boolean
+        get() = linkState == LinkState.PATIENT
+
+    /**
+     * Editar e excluir medicamentos do [patientId]: paciente e cuidador vinculado.
+     * Igual a [AccessPolicy.canManageMedications]. NÃO inclui cadastrar.
+     */
     val canManageMedications: Boolean
         get() = linkState == LinkState.PATIENT || linkState == LinkState.CAREGIVER_LINKED
 

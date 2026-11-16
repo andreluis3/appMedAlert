@@ -6,11 +6,14 @@ import com.andre.medalert.data.local.entity.DoseHistoryEntity
 import com.andre.medalert.data.local.entity.MedicationEntity
 import com.andre.medalert.data.remote.ApiService
 import com.andre.medalert.data.remote.RetrofitClient
+import com.andre.medalert.data.remote.SessionManager
 import com.andre.medalert.data.remote.dto.DashboardResponse
 import com.andre.medalert.data.remote.dto.DoseTakenRequest
 import com.andre.medalert.data.remote.dto.DoseTakenRequestFactory
 import com.andre.medalert.data.remote.dto.HistoryRecordDto
 import com.andre.medalert.data.schedule.DoseReconciler
+import com.andre.medalert.data.session.AccessPolicy
+import com.andre.medalert.data.session.SessionInfo
 import com.andre.medalert.util.AppLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
@@ -56,11 +59,28 @@ private sealed interface SendResult {
 /**
  * Offline-first: a UI observa SEMPRE o Room. A API só alimenta o Room (reconciliação do dia)
  * ou recebe as doses registradas localmente (POST /api/historys).
+ *
+ * [sessionProvider] devolve a sessão atual. Antes de buscar do servidor, antes de gravar o que
+ * veio e antes de cada POST, o repositório confere que a sessão ainda é a do paciente cujos dados
+ * está tratando; se mudou (logout, outro login, troca de vínculo), a operação para sem gravar
+ * mais nada. O padrão lê o [SessionManager]; se ele ainda não foi iniciado (testes), devolve null
+ * e a conferência é dispensada.
+ *
+ * Limite conhecido: a conferência acontece imediatamente antes do POST, mas entre ela e o envio
+ * o token continua sendo o da sessão do momento. O backend precisa recusar (403) doses cujo
+ * usuario_id não seja do paciente autorizado pelo token.
  */
 class HistoryRepository(
     private val dao: DoseHistoryDao,
-    private val api: ApiService = RetrofitClient.instance
+    private val api: ApiService = RetrofitClient.instance,
+    private val sessionProvider: suspend () -> SessionInfo? = { SessionManager.currentSession() }
 ) {
+
+    /** A sessão atual ainda acompanha o paciente [patientId]? Sem sessão disponível: dispensa. */
+    private suspend fun sessionOwns(patientId: Int): Boolean {
+        val session = sessionProvider() ?: return true
+        return AccessPolicy.patientIdFor(session.tipo, session.userId, session.pacienteId) == patientId
+    }
 
     /** Só as doses do dia atual. */
     fun observeHistory(userId: Int): Flow<List<DoseHistoryEntity>> =
@@ -75,11 +95,15 @@ class HistoryRepository(
 
     /**
      * GET /api/historys/doseDia/{userId} e reconciliação INCREMENTAL com o Room.
-     * Em falha (rede ou HTTP) o Room fica exatamente como está.
+     * Em falha (rede ou HTTP) o Room fica exatamente como está. Se a sessão deixou de ser a do
+     * paciente [userId] antes ou durante a requisição, devolve [StaleSessionException] e não grava.
      */
-    suspend fun refresh(userId: Int, medications: List<MedicationEntity>): Result<Unit> =
-        try {
+    suspend fun refresh(userId: Int, medications: List<MedicationEntity>): Result<Unit> {
+        return try {
+            if (!sessionOwns(userId)) return Result.failure(StaleSessionException())
             val remote = api.getDosesDia(userId)
+            // A resposta pode chegar depois de um logout ou de uma troca de vínculo.
+            if (!sessionOwns(userId)) return Result.failure(StaleSessionException())
             reconcileToday(userId, remote, medications)
             Result.success(Unit)
         } catch (e: CancellationException) {
@@ -88,6 +112,7 @@ class HistoryRepository(
             AppLog.w(TAG, "Falha ao buscar as doses do dia", e)
             Result.failure(e)
         }
+    }
 
     /**
      * Reconciliação sem apagar nada:
@@ -122,7 +147,7 @@ class HistoryRepository(
                     val localId = row.medicationLocalId
                     val scheduled = row.previstoEm
                     if (localId != null && scheduled != null) {
-                        dao.markSyncedByDose(localId, scheduled)
+                        dao.markSyncedByDoseForUser(userId, localId, scheduled)
                     }
                 } else {
                     inserted++
@@ -138,17 +163,9 @@ class HistoryRepository(
     }
 
     /**
-     * Registra no Room uma dose tomada pela notificação e desconta o estoque (se o medicamento
-     * tem estoque informado), na mesma transação. `inserted = false` no resultado significa que
-     * essa dose (medicamento + horário previsto) já estava registrada: nada é descontado de novo.
-     *
-     * A linha fica com isSynced = false e é enviada depois por [syncPending]. [medicationRemoteId]
-     * é o ID REMOTO (null se o medicamento ainda não foi sincronizado); o ID local nunca vai para
-     * o campo remoto. [quantityPerDose] é a quantidade por dose do medicamento (mínimo 1).
-     */
-    /**
      * Registra no Room uma dose tomada pela notificação ou pela Home. `inserted = false` no
-     * resultado significa que essa dose (medicamento + horário previsto) já estava registrada.
+     * resultado significa que essa dose (medicamento + horário previsto) já estava registrada
+     * (ou, com `refused = true`, que o medicamento pertence a outro paciente).
      *
      * A linha fica com isSynced = false e é enviada depois por [syncPending]. [medicationRemoteId]
      * é o ID REMOTO (null se o medicamento ainda não foi sincronizado); o ID local nunca vai para
@@ -187,14 +204,19 @@ class HistoryRepository(
     /**
      * Envia ao POST /api/historys as doses do paciente [userId] ainda não sincronizadas.
      *
-     * - medicamento_id = ID REMOTO (da própria linha ou lido do medicamento no Room); sem ID
-     *   remoto a dose espera ([SyncOutcome.waiting]) e NUNCA vai com o ID local.
+     * - medicamento_id = ID REMOTO (da própria linha ou lido do medicamento no Room, só se ele
+     *   for do mesmo paciente); sem ID remoto a dose espera ([SyncOutcome.waiting]) e NUNCA vai
+     *   com o ID local.
      * - usuario_id = paciente dono da linha (a consulta já filtra pelo paciente da sessão).
      * - tomado_em = horário real da tomada (ISO-8601 com offset).
      * - isSynced só vira true depois de um código HTTP 2xx.
      * - Sem conexão ou 5xx: para o laço e pede nova tentativa; 401: para (a sessão já foi tratada
      *   pelo interceptor); outros 4xx: a dose continua pendente e é contada em [SyncOutcome.rejected].
      * - Doses de medicamento excluído não são enviadas (ficam fora da consulta).
+     * - Se a sessão deixar de ser a do paciente [userId], o ciclo para sem enviar mais nada e SEM
+     *   pedir nova tentativa: as doses continuam pendentes no Room e sobem quando esse paciente
+     *   (ou o cuidador vinculado a ele) estiver na sessão de novo; o SessionLifecycle já
+     *   enfileira a sincronização da sessão nova.
      *
      * [userId] é sempre o PACIENTE dono das doses: o cuidador também envia, com o id do paciente
      * vinculado. Quem chama deve conferir AccessPolicy.canRegisterDose.
@@ -209,6 +231,10 @@ class HistoryRepository(
         userId: Int,
         zone: ZoneId = ZoneId.systemDefault()
     ): SyncOutcome = syncMutex.withLock {
+        if (!sessionOwns(userId)) {
+            return@withLock SyncOutcome(sent = 0, rejected = 0, waiting = 0, shouldRetry = false)
+        }
+
         var pending = dao.getUnsyncedByUser(userId)
         if (pending.isNotEmpty()) {
             reconcileBeforeSending(userId, pending, zone)
@@ -224,12 +250,17 @@ class HistoryRepository(
         loop@ for (row in pending) {
             val takenAt = row.tomadoEm
             val localId = row.medicationLocalId
-            val remoteMedicationId = row.medicamentoId ?: localId?.let { dao.remoteIdOf(it) }
+            val remoteMedicationId =
+                row.medicamentoId ?: localId?.let { dao.remoteIdOfForUser(it, row.userId) }
 
             if (takenAt == null || remoteMedicationId == null) {
                 waiting++
                 continue@loop
             }
+
+            // A sessão pode ter mudado desde o início do ciclo (outro login, troca de vínculo):
+            // nunca envia dose de um paciente com o token de outra sessão.
+            if (!sessionOwns(userId)) break@loop
 
             val request = DoseTakenRequestFactory.create(
                 userId = row.userId,
@@ -240,7 +271,7 @@ class HistoryRepository(
 
             when (val result = send(request)) {
                 is SendResult.Ok -> {
-                    dao.markSynced(row.id)
+                    dao.markSyncedForUser(row.id, row.userId)
                     sent++
                 }
 
@@ -252,7 +283,7 @@ class HistoryRepository(
                 is SendResult.Http -> when {
                     result.code == 401 -> break@loop
                     result.code == 409 -> {
-                        dao.markSynced(row.id)
+                        dao.markSyncedForUser(row.id, row.userId)
                         duplicates++
                     }
                     result.code >= 500 -> {
@@ -289,6 +320,7 @@ class HistoryRepository(
         if (pending.none { it.dia == today.toString() }) return
         try {
             val remote = api.getDosesDia(userId)
+            if (!sessionOwns(userId)) return
             reconcileToday(userId, remote, dao.medicationsOf(userId), zone, today)
         } catch (e: CancellationException) {
             throw e

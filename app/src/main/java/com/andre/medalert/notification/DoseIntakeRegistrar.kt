@@ -80,6 +80,7 @@ object DoseIntakeRegistrar {
                 registeredById = session.userId
             )
 
+            if (result.refused) return@withContext DoseRegisterResult.MEDICATION_UNAVAILABLE
             if (!result.inserted) return@withContext DoseRegisterResult.ALREADY_REGISTERED
 
             // O registro local já está salvo: falhar ao agendar o envio não pode virar ERROR.

@@ -10,6 +10,11 @@ import com.andre.medalert.data.local.entity.MedicationEntity
 import com.andre.medalert.data.local.entity.preservingDetailsFrom
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * Toda escrita/exclusão que age sobre UMA linha por id tem uma versão "ForUser" que exige que a
+ * linha pertença ao paciente informado. As versões sem dono continuam existindo por
+ * compatibilidade, mas estão @Deprecated: novo código deve usar as "ForUser".
+ */
 @Dao
 abstract class MedicationDao {
 
@@ -31,7 +36,17 @@ abstract class MedicationDao {
         id: Long
     ): MedicationEntity?
 
+    /** Igual a [getById], mas devolve null se a linha for de OUTRO paciente. */
+    @Query(
+        "SELECT * FROM medications WHERE id = :id AND userId = :userId"
+    )
+    abstract suspend fun getByIdForUser(
+        id: Long,
+        userId: Int
+    ): MedicationEntity?
+
     /** Pendências de TODOS os usuários. Mantido por compatibilidade; o sync usa [getUnsyncedByUser]. */
+    @Deprecated("Mistura pacientes. Use getUnsyncedByUser(userId).")
     @Query(
         "SELECT * FROM medications WHERE isSynced = 0"
     )
@@ -100,12 +115,29 @@ abstract class MedicationDao {
 
     /**
      * Atualiza a linha inteira, mantendo o mesmo ID local.
-     * Usado depois que a API confirma uma edição.
+     * Não confere o dono: prefira [updateForUser].
      */
+    @Deprecated("Não confere o dono da linha. Use updateForUser(entity, userId).")
     @Update
     abstract suspend fun update(
         entity: MedicationEntity
     )
+
+    /**
+     * Atualiza a linha inteira SÓ se ela existe e pertence a [userId] (e a entidade também diz
+     * ser de [userId]). Devolve false, sem gravar nada, caso contrário.
+     */
+    @Transaction
+    open suspend fun updateForUser(
+        entity: MedicationEntity,
+        userId: Int
+    ): Boolean {
+        val current = getById(entity.id) ?: return false
+        if (current.userId != userId || entity.userId != userId) return false
+        @Suppress("DEPRECATION")
+        update(entity)
+        return true
+    }
 
     /**
      * Insere ou substitui os registros existentes
@@ -121,6 +153,7 @@ abstract class MedicationDao {
      *
      * Mantido para compatibilidade com chamadas existentes.
      */
+    @Deprecated("Não confere o dono nem grava o remoteId. Use confirmSynced.")
     @Query(
         """
         UPDATE medications
@@ -134,12 +167,9 @@ abstract class MedicationDao {
 
     /**
      * Marca como sincronizado e guarda o ID do medicamento no backend.
-     *
-     * O ID remoto é obrigatório para evitar registros
-     * marcados como sincronizados sem identificação no backend.
-     *
-     * Retorna a quantidade de linhas atualizadas.
+     * Não confere o dono: prefira [markSyncedWithRemoteForUser] (ou [confirmSynced]).
      */
+    @Deprecated("Não confere o dono da linha. Use markSyncedWithRemoteForUser.")
     @Query(
         """
         UPDATE medications
@@ -151,6 +181,24 @@ abstract class MedicationDao {
     abstract suspend fun markSyncedWithRemote(
         id: Long,
         remoteId: Int
+    ): Int
+
+    /**
+     * Marca como sincronizado e guarda o ID remoto, SÓ se a linha pertence a [userId].
+     * Retorna a quantidade de linhas atualizadas.
+     */
+    @Query(
+        """
+        UPDATE medications
+        SET isSynced = 1,
+            remoteId = :remoteId
+        WHERE id = :id AND userId = :userId
+        """
+    )
+    abstract suspend fun markSyncedWithRemoteForUser(
+        id: Long,
+        remoteId: Int,
+        userId: Int
     ): Int
 
     /** Apaga qualquer OUTRA linha do usuário com o mesmo remoteId (cópia criada por um refresh). */
@@ -172,8 +220,10 @@ abstract class MedicationDao {
      * Se um refresh (GET) rodou entre o POST e esta chamada, a lista da API já trouxe o
      * medicamento recém-criado como uma linha NOVA com o mesmo remoteId. Essa cópia é removida
      * na mesma transação, então nunca ficam duas linhas para o mesmo medicamento.
+     * A linha local só é confirmada se pertencer a [userId].
      *
-     * Retorna a quantidade de linhas atualizadas (0 = a linha local não existe mais).
+     * Retorna a quantidade de linhas atualizadas (0 = a linha local não existe mais, ou é de
+     * outro paciente).
      */
     @Transaction
     open suspend fun confirmSynced(
@@ -182,9 +232,10 @@ abstract class MedicationDao {
         userId: Int
     ): Int {
         deleteOthersWithRemoteId(userId, remoteId, localId)
-        return markSyncedWithRemote(localId, remoteId)
+        return markSyncedWithRemoteForUser(localId, remoteId, userId)
     }
 
+    @Deprecated("Não confere o dono da linha. Use deleteByIdForUser ou deleteKeepingHistoryForUser.")
     @Query(
         "DELETE FROM medications WHERE id = :id"
     )
@@ -192,7 +243,16 @@ abstract class MedicationDao {
         id: Long
     )
 
+    @Query(
+        "DELETE FROM medications WHERE id = :id AND userId = :userId"
+    )
+    abstract suspend fun deleteByIdForUser(
+        id: Long,
+        userId: Int
+    )
+
     /** Marca como "medicamento excluído" o histórico local das doses desse medicamento. */
+    @Deprecated("Não confere o dono. Use markHistoryRemovedForUser.")
     @Query(
         "UPDATE dose_history SET medicamentoRemovido = 1 WHERE medicationLocalId IN (:localIds)"
     )
@@ -200,19 +260,52 @@ abstract class MedicationDao {
         localIds: List<Long>
     )
 
+    /** Igual a [markHistoryRemoved], limitado às doses do paciente [userId]. */
+    @Query(
+        """
+        UPDATE dose_history SET medicamentoRemovido = 1
+        WHERE userId = :userId AND medicationLocalId IN (:localIds)
+        """
+    )
+    abstract suspend fun markHistoryRemovedForUser(
+        userId: Int,
+        localIds: List<Long>
+    )
+
     /**
      * Exclui o medicamento PRESERVANDO o histórico de doses: as linhas de dose_history ficam
      * (com nome e dosagem gravados) e só ganham a marca medicamentoRemovido. Tudo na mesma
      * transação: ou o medicamento some e o histórico é marcado, ou nada muda.
+     * Não confere o dono: prefira [deleteKeepingHistoryForUser].
      */
+    @Deprecated("Não confere o dono da linha. Use deleteKeepingHistoryForUser.")
     @Transaction
     open suspend fun deleteKeepingHistory(
         localId: Long
     ) {
+        @Suppress("DEPRECATION")
         markHistoryRemoved(listOf(localId))
+        @Suppress("DEPRECATION")
         deleteById(localId)
     }
 
+    /**
+     * Exclui o medicamento preservando o histórico, SÓ se ele pertence a [userId].
+     * Devolve false, sem alterar nada, se a linha não existe ou é de outro paciente.
+     */
+    @Transaction
+    open suspend fun deleteKeepingHistoryForUser(
+        localId: Long,
+        userId: Int
+    ): Boolean {
+        val current = getById(localId) ?: return false
+        if (current.userId != userId) return false
+        markHistoryRemovedForUser(userId, listOf(localId))
+        deleteByIdForUser(localId, userId)
+        return true
+    }
+
+    @Deprecated("Não confere o dono das linhas. Use deleteByIdsForUser.")
     @Query(
         "DELETE FROM medications WHERE id IN (:ids)"
     )
@@ -221,9 +314,28 @@ abstract class MedicationDao {
     )
 
     @Query(
+        "DELETE FROM medications WHERE userId = :userId AND id IN (:ids)"
+    )
+    abstract suspend fun deleteByIdsForUser(
+        userId: Int,
+        ids: List<Long>
+    )
+
+    /**
+     * Remove os medicamentos sincronizados de [userId], MAS nunca os que uma dose ainda pendente
+     * de envio referencia (a dose perderia o medicamento e o remoteId de que precisa para subir).
+     * Mesma regra de [deleteSyncedByUserKeepingReferenced]; mantido com este nome por
+     * compatibilidade, agora sem o risco de apagar o que uma dose pendente precisa.
+     */
+    @Deprecated("Use deleteSyncedByUserKeepingReferenced, que informa quantas linhas saíram.")
+    @Query(
         """
         DELETE FROM medications
         WHERE userId = :userId AND isSynced = 1
+          AND id NOT IN (
+              SELECT medicationLocalId FROM dose_history
+              WHERE isSynced = 0 AND medicationLocalId IS NOT NULL
+          )
         """
     )
     abstract suspend fun deleteSyncedByUser(
@@ -260,6 +372,7 @@ abstract class MedicationDao {
      * - remoteId repetido dentro da MESMA resposta: só o primeiro entra (evita linhas duplicadas).
      * - Medicamento ausente na API: remove o registro sincronizado.
      * - Medicamentos criados offline (isSynced = 0): não são alterados.
+     * - Toda exclusão e marcação de histórico fica limitada ao paciente [userId].
      */
     @Transaction
     open suspend fun replaceSynced(
@@ -295,8 +408,8 @@ abstract class MedicationDao {
 
         if (toDelete.isNotEmpty()) {
             // Sumiu da API (excluído em outro aparelho, por exemplo): o histórico local fica.
-            markHistoryRemoved(toDelete)
-            deleteByIds(toDelete)
+            markHistoryRemovedForUser(userId, toDelete)
+            deleteByIdsForUser(userId, toDelete)
         }
 
         upsertAll(merged)

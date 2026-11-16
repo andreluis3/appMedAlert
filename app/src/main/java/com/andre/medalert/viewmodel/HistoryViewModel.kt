@@ -10,19 +10,23 @@ import com.andre.medalert.data.model.HistoryUiModel
 import com.andre.medalert.data.repository.HistoryRepository
 import com.andre.medalert.data.schedule.DoseTimelineBuilder
 import com.andre.medalert.data.schedule.HistoryRange
-import com.andre.medalert.data.schedule.SessionMedications
 import com.andre.medalert.data.schedule.toUiModel
-import com.andre.medalert.data.session.AccessPolicy
+import com.andre.medalert.data.session.SessionIdentity
+import com.andre.medalert.data.session.identity
 import com.andre.medalert.sync.MedicationSyncWorker
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.time.LocalDateTime
 
@@ -44,10 +48,17 @@ sealed interface HistoryUiState {
  *
  * O GET /historys/doseDia só reconcilia o dia de hoje (sem apagar nada); Semana, Mês e Todos são
  * calculados localmente.
+ *
+ * A sessão é OBSERVADA, não lida uma vez: login, logout e troca de vínculo reiniciam a
+ * observação para o paciente certo (collectLatest cancela a anterior, inclusive um refresh em
+ * andamento). Medicamentos e registros vêm SEMPRE do mesmo paciente.
  */
 class HistoryViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repository = HistoryRepository(AppDatabase.getInstance(application).doseHistoryDao())
+    private val database = AppDatabase.getInstance(application)
+    private val repository = HistoryRepository(database.doseHistoryDao())
+    private val medicationDao = database.medicationDao()
+    private val prefs = UserPreferencesRepository(application)
 
     private val _uiState = MutableStateFlow<HistoryUiState>(HistoryUiState.Loading)
     val uiState: StateFlow<HistoryUiState> = _uiState.asStateFlow()
@@ -70,54 +81,62 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
         observeJob = viewModelScope.launch {
             _uiState.value = HistoryUiState.Loading
 
-            val session = UserPreferencesRepository(getApplication<Application>()).session.first()
-            val patientId = AccessPolicy.patientIdFor(session.tipo, session.userId, session.pacienteId)
-            if (patientId == null ||
-                !AccessPolicy.canViewHistory(session.tipo, session.userId, session.pacienteId)
-            ) {
-                _uiState.value =
-                    if (AccessPolicy.isAwaitingLink(session.tipo, session.userId, session.pacienteId)) {
-                        HistoryUiState.AwaitingLink
-                    } else {
-                        HistoryUiState.Error("Sessão expirada. Entre novamente.")
-                    }
-                return@launch
-            }
+            prefs.session
+                .map { it.identity() }
+                .distinctUntilChanged()
+                .collectLatest { identity -> observe(identity) }
+        }
+    }
 
-            // Paciente e cuidador enviam as doses pendentes do paciente (medicamentos pendentes
-            // sobem antes, na mesma sincronização).
-            if (AccessPolicy.canRegisterDose(session.tipo, session.userId, session.pacienteId)) {
-                try {
-                    MedicationSyncWorker.enqueue(getApplication<Application>())
-                } catch (_: Exception) {
-                    // O envio será tentado de novo na próxima abertura do app.
+    /** Observa o paciente de UMA identidade; é cancelada inteira quando a identidade muda. */
+    private suspend fun observe(identity: SessionIdentity): Unit = coroutineScope {
+        val patientId = identity.patientId
+        if (patientId == null) {
+            _uiState.value =
+                if (identity.awaitingLink) {
+                    HistoryUiState.AwaitingLink
+                } else {
+                    HistoryUiState.Error("Sessão expirada. Entre novamente.")
                 }
-            }
+            return@coroutineScope
+        }
 
-            val medicationsFlow = SessionMedications.observe(getApplication<Application>())
+        // Nunca mostra o conteúdo do paciente anterior enquanto o novo carrega.
+        _uiState.value = HistoryUiState.Loading
 
-            // Atualiza o dia de hoje com o servidor em paralelo. Se falhar, o Room fica como está
-            // e a tela continua mostrando o que existe localmente.
-            launch {
-                val medications = medicationsFlow.first()
-                repository.refresh(patientId, medications)
-            }
+        // Paciente e cuidador enviam as doses pendentes do paciente (medicamentos pendentes
+        // sobem antes, na mesma sincronização).
+        try {
+            MedicationSyncWorker.enqueue(getApplication<Application>())
+        } catch (_: Exception) {
+            // O envio será tentado de novo na próxima abertura do app.
+        }
 
-            // Continua observando o Room: uma dose registrada pela notificação aparece
-            // na tela na hora, mesmo com a tela já aberta.
-            combine(
-                medicationsFlow,
-                repository.observeAll(patientId),
-                _period,
-                minuteTicker()
-            ) { medications, records, period, now ->
-                val earliest = HistoryRange.earliestDate(medications, records)
-                val (from, toExclusive) = HistoryRange.of(period, now.toLocalDate(), earliest)
-                val events = DoseTimelineBuilder.build(medications, records, from, toExclusive, now)
-                HistoryUiState.Content(records = events.map { it.toUiModel() }, period = period)
-            }.collect { content ->
-                _uiState.value = content
-            }
+        // Medicamentos do MESMO paciente dos registros (não depende de outra leitura de sessão).
+        val medicationsFlow = medicationDao.observeByUser(patientId)
+
+        // Atualiza o dia de hoje com o servidor em paralelo. Se falhar, o Room fica como está
+        // e a tela continua mostrando o que existe localmente. Se a identidade mudar, este
+        // launch é cancelado junto com o scope: nada é gravado para o paciente antigo.
+        launch {
+            val medications = medicationsFlow.first()
+            repository.refresh(patientId, medications)
+        }
+
+        // Continua observando o Room: uma dose registrada pela notificação aparece
+        // na tela na hora, mesmo com a tela já aberta.
+        combine(
+            medicationsFlow,
+            repository.observeAll(patientId),
+            _period,
+            minuteTicker()
+        ) { medications, records, period, now ->
+            val earliest = HistoryRange.earliestDate(medications, records)
+            val (from, toExclusive) = HistoryRange.of(period, now.toLocalDate(), earliest)
+            val events = DoseTimelineBuilder.build(medications, records, from, toExclusive, now)
+            HistoryUiState.Content(records = events.map { it.toUiModel() }, period = period)
+        }.collect { content ->
+            _uiState.value = content
         }
     }
 

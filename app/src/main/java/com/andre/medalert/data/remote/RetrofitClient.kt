@@ -48,7 +48,8 @@ object RetrofitClient {
         val response = chain.proceed(request)
 
         if (response.code == 401 && !publica) {
-            SessionManager.expire()
+            // Informa qual token fez a requisição: 401 tardio de sessão antiga não derruba a nova.
+            SessionManager.expire(token)
         }
 
         response

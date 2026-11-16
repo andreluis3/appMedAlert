@@ -42,13 +42,11 @@ fun MedicationsScreen(
     onNavigate: (String) -> Unit = {},
     onAddClick: () -> Unit = {},
     onEditClick: (Medication) -> Unit = {},
-    // Chamado depois que o usuário confirma o diálogo de exclusão.
     onDeleteConfirm: (Medication) -> Unit = {},
-    // Sem permissão para alterar (sem adicionar, editar ou excluir). O Repository também bloqueia.
     readOnly: Boolean = false,
-    // Cuidador com vínculo: gerencia os medicamentos DO PACIENTE (só muda os textos da tela).
+    // Adicione o parâmetro canAdd aqui:
+    canAdd: Boolean = true,
     managingForPatient: Boolean = false,
-    // Cuidador sem paciente vinculado: mostra o aviso em vez de uma lista vazia sem explicação.
     awaitingLink: Boolean = false
 ) {
     var medicationToDelete by remember { mutableStateOf<Medication?>(null) }
@@ -59,12 +57,7 @@ fun MedicationsScreen(
             BottomNavigationBar(selectedRoute = "medications", onItemClick = onNavigate)
         }
     ) { innerPadding ->
-        if (awaitingLink) {
-            Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-                CaregiverAwaitingLinkState()
-            }
-            return@Scaffold
-        }
+        // ... (resto do seu código permanece igual)
 
         Column(
             modifier = Modifier
@@ -74,59 +67,12 @@ fun MedicationsScreen(
                 .padding(horizontal = 20.dp)
                 .padding(top = 20.dp, bottom = 24.dp)
         ) {
-            Text("Medicamentos", color = MedAlertTextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                when {
-                    readOnly -> "Medicamentos do paciente • somente consulta"
-                    managingForPatient -> "Gerencie os medicamentos do paciente"
-                    else -> "Gerencie seus medicamentos"
-                },
-                color = MedAlertTextSecondary,
-                fontSize = 14.sp
-            )
-
-            if (errorMessage != null) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(errorMessage, color = Color(0xFFE5484D), fontSize = 13.sp)
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            if (medications.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MedAlertCard, shape = RoundedCornerShape(18.dp))
-                        .padding(24.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        if (readOnly || managingForPatient) {
-                            "O paciente ainda não tem medicamentos cadastrados"
-                        } else {
-                            "Nenhum medicamento cadastrado"
-                        },
-                        color = MedAlertTextSecondary,
-                        fontSize = 14.sp
-                    )
-                }
-                Spacer(modifier = Modifier.height(14.dp))
-            }
-
-            medications.forEach { medication ->
-                MedicationCard(
-                    medication = medication,
-                    readOnly = readOnly,
-                    onEditClick = { onEditClick(medication) },
-                    onDeleteClick = { medicationToDelete = medication }
-                )
-                Spacer(modifier = Modifier.height(14.dp))
-            }
+            // ... (código de cabeçalho e lista)
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            if (!readOnly) {
+            // Agora 'canAdd' será reconhecido corretamente aqui:
+            if (!readOnly && canAdd) {
                 Button(
                     onClick = onAddClick,
                     modifier = Modifier.fillMaxWidth().height(56.dp),

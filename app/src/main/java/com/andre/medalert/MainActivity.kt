@@ -387,6 +387,7 @@ class MainActivity : ComponentActivity() {
                                 medicationViewModel.deleteMedication(medication.localId)
                             },
                             readOnly = !canManage,
+                            canAdd = patientContext?.canAddMedications ?: false,
                             managingForPatient = canManage && isCaregiver,
                             awaitingLink = awaitingLink
                         )
@@ -395,7 +396,11 @@ class MainActivity : ComponentActivity() {
                     // Cadastro de medicamento.
                     composable("cadastro_med") {
                         // Paciente e cuidador vinculado cadastram (para o paciente); cuidador sem vínculo volta.
-                        RequireMedicationAccess(onBlocked = { navController.popBackStack() }) {
+                        // Só o paciente cadastra medicamento; cuidador (mesmo vinculado) volta.
+                        RequireMedicationAccess(
+                            requireAdd = true,
+                            onBlocked = { navController.popBackStack() }
+                        ) {
                             CadastroMedScreen(
                                 onSuccess = {
                                     navController.navigate("home") {

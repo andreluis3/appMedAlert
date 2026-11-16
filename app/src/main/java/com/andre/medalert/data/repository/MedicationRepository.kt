@@ -24,6 +24,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import retrofit2.HttpException
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicLong
 
 private const val TAG = "MedicationRepo"
 
@@ -34,9 +35,18 @@ private const val TAG = "MedicationRepo"
  * - [cadastroMutex]: protege o "procura pendente igual / insere" (curto, só Room).
  * - [envioMutex]: garante que só um fluxo por vez faça POST /api/meds de pendentes
  *   (cadastro e syncPending), evitando enviar o mesmo medicamento duas vezes.
+ * - [commitMutex] + [mutationEpoch]: ordenam o refresh em relação a edição e exclusão. A trava
+ *   é curta (só Room, nunca durante a rede). Toda edição/exclusão confirmada pela API grava no
+ *   Room dentro dela e sobe o contador; o refresh só grava se o contador não mudou desde que
+ *   ele começou a buscar na API (senão a resposta pode ser anterior à ação do usuário).
  */
 private val cadastroMutex = Mutex()
 private val envioMutex = Mutex()
+private val commitMutex = Mutex()
+private val mutationEpoch = AtomicLong(0)
+
+/** Quantas vezes o refresh refaz a busca quando uma edição/exclusão aconteceu no meio dela. */
+private const val MAX_TENTATIVAS_REFRESH = 3
 
 /**
  * Chaves de estoque que NUNCA podem ir ao backend (a coluna não existe lá: Prisma P2022).
@@ -53,6 +63,13 @@ private val CAMPOS_FORA_DO_CONTRATO = setOf(
  */
 class NoLinkedPatientException :
     Exception("Vincule-se a um paciente para gerenciar os medicamentos.")
+
+/**
+ * Cuidador (mesmo vinculado) tentou CADASTRAR um medicamento. Só o paciente cadastra; o cuidador
+ * pode editar e excluir os do paciente vinculado.
+ */
+class CaregiverCannotAddException :
+    Exception("Somente o paciente pode cadastrar medicamentos.")
 
 /**
  * A sessão mudou (logout, outro login, troca de paciente) entre o início e o fim de uma
@@ -86,8 +103,11 @@ enum class SaveOutcome {
  * - cuidador: GET /api/meds/cuid/{cuidadorId} (usa o id do CUIDADOR só na URL; os medicamentos
  *   são gravados com o id do PACIENTE vinculado) e guarda usuarios.nome como nome do paciente.
  *
- * Quem pode alterar (cadastrar, editar, excluir): paciente, e cuidador COM vínculo válido, sempre
- * sobre os medicamentos do paciente. Cuidador sem vínculo e sessão vazia: nada (AccessPolicy).
+ * Permissões (AccessPolicy):
+ * - cadastrar: SÓ o paciente;
+ * - editar e excluir: paciente, e cuidador COM vínculo válido, sempre sobre os medicamentos do
+ *   paciente vinculado;
+ * - cuidador sem vínculo e sessão vazia: nada.
  *
  * Autenticação: o token JWT é anexado pelo interceptor do RetrofitClient. Um 401 numa rota
  * protegida já limpa a sessão e leva o usuário ao login; aqui só traduzimos a mensagem.
@@ -112,7 +132,10 @@ class MedicationRepository(
         { patientId, name -> userPrefs.saveLinkedPatientName(patientId, name) }
     )
 
-    /** Sessão autorizada a alterar medicamentos e o paciente dono deles. */
+    /** O que o usuário quer fazer com um medicamento (cada ação tem a sua permissão). */
+    private enum class Acao { CADASTRAR, EDITAR, EXCLUIR }
+
+    /** Sessão autorizada para a ação e o paciente dono dos medicamentos. */
     private class WriteAccess(val session: SessionInfo, val patientId: Int)
 
     /** O que o servidor devolveu, já independente de paciente/cuidador. */
@@ -146,11 +169,11 @@ class MedicationRepository(
 
     /**
      * Abre um medicamento (ID LOCAL do Room) para a tela de edição. Falha se a sessão não pode
-     * alterar medicamentos (cuidador sem vínculo, sem sessão), se o medicamento não existe, se ele
+     * editar medicamentos (cuidador sem vínculo, sem sessão), se o medicamento não existe, se ele
      * é de OUTRO paciente que não o autorizado na sessão, ou se ainda não tem remoteId.
      */
     suspend fun loadForEdit(localId: Long): Result<MedicationEntity> {
-        val access = writeAccess().getOrElse { return Result.failure(it) }
+        val access = writeAccess(Acao.EDITAR).getOrElse { return Result.failure(it) }
         val entity = dao.getById(localId)
             ?: return Result.failure(Exception("Medicamento não encontrado."))
         if (!podeAlterar(access.session, entity)) {
@@ -171,6 +194,11 @@ class MedicationRepository(
      * Recusa ([StaleSessionException]) quando [patientId] não é o paciente da sessão atual, e
      * descarta a resposta se a sessão mudou enquanto a requisição estava em andamento.
      * Uma resposta sem "usuarios"/"medicamentos" (cuidador) é falha, nunca "lista vazia".
+     *
+     * Ordem com edição/exclusão: se uma edição ou exclusão foi confirmada pela API enquanto este
+     * refresh buscava a lista, a resposta pode ser anterior à ação (o medicamento excluído
+     * reapareceria, a edição seria desfeita). Nesse caso ela é descartada e a busca é refeita;
+     * esgotadas as tentativas, o Room fica como está (ele já reflete a ação do usuário).
      */
     suspend fun refresh(patientId: Int): Result<Unit> {
         val session = sessionProvider()
@@ -180,18 +208,36 @@ class MedicationRepository(
         }
 
         return try {
-            val snapshot = fetchSnapshot(session, patientId)
+            for (tentativa in 1..MAX_TENTATIVAS_REFRESH) {
+                val epochAntes = mutationEpoch.get()
+                val snapshot = fetchSnapshot(session, patientId)
 
-            // A resposta pode chegar depois de um logout ou de uma troca de vínculo.
-            val after = sessionProvider()
-            if (after.userId != session.userId ||
-                AccessPolicy.patientIdFor(after.tipo, after.userId, after.pacienteId) != patientId
-            ) {
-                return Result.failure(StaleSessionException())
+                // A resposta pode chegar depois de um logout ou de uma troca de vínculo.
+                val after = sessionProvider()
+                if (after.userId != session.userId ||
+                    AccessPolicy.patientIdFor(after.tipo, after.userId, after.pacienteId) != patientId
+                ) {
+                    return Result.failure(StaleSessionException())
+                }
+
+                val gravou = commitMutex.withLock {
+                    if (mutationEpoch.get() != epochAntes) {
+                        false
+                    } else {
+                        dao.replaceSynced(patientId, entitiesFrom(snapshot, patientId))
+                        true
+                    }
+                }
+
+                if (gravou) {
+                    snapshot.patientName?.let { rememberPatientName(patientId, it) }
+                    return Result.success(Unit)
+                }
+
+                AppLog.d(TAG, "refresh descartado (edição/exclusão no meio), tentativa $tentativa")
             }
 
-            dao.replaceSynced(patientId, entitiesFrom(snapshot, patientId))
-            snapshot.patientName?.let { rememberPatientName(patientId, it) }
+            AppLog.w(TAG, "refresh não gravou: houve alterações a cada tentativa; Room mantido")
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
@@ -258,19 +304,45 @@ class MedicationRepository(
     }
 
     /**
-     * Sessão autorizada a alterar medicamentos (cadastrar, editar, excluir) e o PACIENTE dono deles:
-     * paciente logado (ele mesmo) ou cuidador logado com paciente vinculado (o vinculado).
+     * Sessão autorizada para a [acao] e o PACIENTE dono dos medicamentos:
+     * - CADASTRAR: só paciente logado (ele mesmo); cuidador recebe [CaregiverCannotAddException];
+     * - EDITAR / EXCLUIR: paciente logado (ele mesmo) ou cuidador logado com paciente vinculado
+     *   (o vinculado).
      * Cuidador sem vínculo recebe [NoLinkedPatientException]; sem sessão, "sessão expirada".
      */
-    private suspend fun writeAccess(): Result<WriteAccess> {
+    private suspend fun writeAccess(acao: Acao): Result<WriteAccess> {
         val session = sessionProvider()
-        val patientId = AccessPolicy.medicationOwnerIdFor(session.tipo, session.userId, session.pacienteId)
+        val patientId = when (acao) {
+            Acao.CADASTRAR ->
+                AccessPolicy.medicationAddOwnerIdFor(session.tipo, session.userId, session.pacienteId)
+
+            Acao.EDITAR ->
+                if (AccessPolicy.canEditMedications(session.tipo, session.userId, session.pacienteId)) {
+                    AccessPolicy.patientIdFor(session.tipo, session.userId, session.pacienteId)
+                } else {
+                    null
+                }
+
+            Acao.EXCLUIR ->
+                if (AccessPolicy.canDeleteMedications(session.tipo, session.userId, session.pacienteId)) {
+                    AccessPolicy.patientIdFor(session.tipo, session.userId, session.pacienteId)
+                } else {
+                    null
+                }
+        }
         if (patientId != null) return Result.success(WriteAccess(session, patientId))
+
         return Result.failure(
-            if (AccessPolicy.isAwaitingLink(session.tipo, session.userId, session.pacienteId)) {
-                NoLinkedPatientException()
-            } else {
-                Exception("Sessão expirada. Faça login novamente.")
+            when {
+                AccessPolicy.isAwaitingLink(session.tipo, session.userId, session.pacienteId) ->
+                    NoLinkedPatientException()
+
+                acao == Acao.CADASTRAR &&
+                        AccessPolicy.isCaregiver(session.tipo) &&
+                        (session.userId ?: 0) > 0 ->
+                    CaregiverCannotAddException()
+
+                else -> Exception("Sessão expirada. Faça login novamente.")
             }
         )
     }
@@ -280,11 +352,25 @@ class MedicationRepository(
         AccessPolicy.canManageMedication(session.tipo, session.userId, session.pacienteId, entity.userId)
 
     /**
-     * POST /api/meds (CadastroMedScreen).
+     * Grava no Room o efeito de uma edição/exclusão JÁ confirmada pela API. Roda sob [commitMutex]
+     * e sobe [mutationEpoch] ao terminar, para qualquer refresh que começou antes descartar a
+     * resposta que buscou. Só Room dentro do bloco: nunca rede (a trava tem que ser curta).
+     */
+    private suspend fun <T> commitLocal(block: suspend () -> T): T =
+        commitMutex.withLock {
+            try {
+                block()
+            } finally {
+                mutationEpoch.incrementAndGet()
+            }
+        }
+
+    /**
+     * POST /api/meds (CadastroMedScreen). SÓ O PACIENTE cadastra: o cuidador (mesmo vinculado)
+     * recebe [CaregiverCannotAddException] antes de qualquer gravação.
      *
      * Fluxo:
-     * 1. O dono REAL é o PACIENTE autorizado na sessão (o próprio, ou o vinculado ao cuidador); o
-     *    userId de [draft] é ignorado. Nada é gravado com o id do cuidador.
+     * 1. O dono REAL é o paciente da sessão; o userId de [draft] é ignorado.
      * 2. Valida horário ("HH:mm") e dosagem (> 0, decimais permitidos).
      * 3. Grava no Room como pendente (isSynced = false). Se já existir um pendente idêntico
      *    (reenvio após falha), reaproveita a mesma linha em vez de criar outra.
@@ -297,7 +383,7 @@ class MedicationRepository(
      * - outros erros HTTP / inesperados: devolve erro, mas o registro continua no Room.
      */
     suspend fun saveMedicationForCurrentUser(draft: MedicamentoData): Result<SaveOutcome> {
-        val access = writeAccess().getOrElse { return Result.failure(it) }
+        val access = writeAccess(Acao.CADASTRAR).getOrElse { return Result.failure(it) }
         val patientId = access.patientId
 
         if (!HorarioDose.ehHoraLocal(draft.horarioDose)) {
@@ -357,12 +443,15 @@ class MedicationRepository(
      * "dosagem" pode ser Int ou Double (ex.: 2.5); o Room recebe como Double.
      * Chaves de estoque são descartadas (o backend não tem essa coluna).
      *
+     * Paciente e cuidador vinculado editam; o medicamento precisa ser do paciente da sessão.
+     *
      * Fluxo: 1) a API confirma; 2) o Room recebe as mesmas mudanças (id local e remoteId
-     * preservados), então a lista já reflete a edição mesmo que o passo 3 falhe; 3) refresh
-     * traz da API o que só ela calcula (ex.: horários). Em caso de erro da API, o Room NÃO muda.
+     * preservados) sob [commitLocal], então a lista já reflete a edição mesmo que o passo 3 falhe e
+     * um refresh que estava em andamento não a desfaz; 3) refresh traz da API o que só ela calcula
+     * (ex.: horários). Em caso de erro da API, o Room NÃO muda.
      */
     suspend fun editMedication(localId: Long, changes: Map<String, Any?>): Result<Unit> {
-        val access = writeAccess().getOrElse { return Result.failure(it) }
+        val access = writeAccess(Acao.EDITAR).getOrElse { return Result.failure(it) }
         val safeChanges = changes.filterKeys { it !in CAMPOS_FORA_DO_CONTRATO }
         if (safeChanges.isEmpty()) return Result.success(Unit)
         val entity = dao.getById(localId)
@@ -377,8 +466,13 @@ class MedicationRepository(
         return try {
             api.editMedicamento(body).close()
 
-            // Relê a linha: um refresh pode ter rodado enquanto a requisição estava em andamento.
-            dao.getById(localId)?.let { dao.update(it.applyChanges(safeChanges)) }
+            // Relê a linha dentro da trava: um refresh pode ter rodado enquanto a requisição
+            // estava em andamento.
+            commitLocal {
+                dao.getByIdForUser(localId, access.patientId)?.let {
+                    dao.updateForUser(it.applyChanges(safeChanges), access.patientId)
+                }
+            }
 
             refresh(entity.userId) // se falhar, o Room já tem a edição; horários atualizam no próximo refresh
             Result.success(Unit)
@@ -390,14 +484,16 @@ class MedicationRepository(
     }
 
     /**
-     * DELETE /api/meds/{remoteId}. Apaga também histórico e horários no backend (cascade).
-     * Só remove do Room depois que a API confirmar. As doses JÁ REGISTRADAS no histórico local
-     * são preservadas e marcadas como "medicamento excluído" (deleteKeepingHistory).
-     * Se o medicamento nunca foi enviado
-     * (criado offline), remove só localmente. 404 = já não existe no servidor: remove local também.
+     * DELETE /api/meds/{remoteId}. Paciente e cuidador vinculado excluem (medicamento do paciente
+     * da sessão). Apaga também histórico e horários no backend (cascade).
+     * Só remove do Room depois que a API confirmar, sob [commitLocal] (um refresh em andamento não
+     * traz o medicamento de volta). As doses JÁ REGISTRADAS no histórico local são preservadas e
+     * marcadas como "medicamento excluído" (deleteKeepingHistoryForUser).
+     * Se o medicamento nunca foi enviado (criado offline), remove só localmente.
+     * 404 = já não existe no servidor: remove local também.
      */
     suspend fun deleteMedication(localId: Long): Result<Unit> {
-        val access = writeAccess().getOrElse { return Result.failure(it) }
+        val access = writeAccess(Acao.EXCLUIR).getOrElse { return Result.failure(it) }
         val entity = dao.getById(localId) ?: return Result.success(Unit)
         if (!podeAlterar(access.session, entity)) {
             return Result.failure(Exception(NAO_PERTENCE_MESSAGE))
@@ -406,20 +502,20 @@ class MedicationRepository(
 
         if (remoteId == null) {
             if (entity.isSynced) return Result.failure(Exception(semRemoteIdMessage(entity)))
-            dao.deleteKeepingHistory(localId)
+            commitLocal { dao.deleteKeepingHistoryForUser(localId, access.patientId) }
             return Result.success(Unit)
         }
 
         return try {
             api.deleteMedicamento(remoteId).close()
-            dao.deleteKeepingHistory(localId)
+            commitLocal { dao.deleteKeepingHistoryForUser(localId, access.patientId) }
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: HttpException) {
             if (e.code() == 404) {
                 AppLog.w(TAG, "DELETE /api/meds/$remoteId -> 404; removendo também do Room")
-                dao.deleteKeepingHistory(localId)
+                commitLocal { dao.deleteKeepingHistoryForUser(localId, access.patientId) }
                 Result.success(Unit)
             } else {
                 falha(e, "DELETE /api/meds/$remoteId", null)
@@ -440,6 +536,9 @@ class MedicationRepository(
      * - Só marca como sincronizado após receber um ID remoto válido.
      * - Qualquer falha mantém o registro no Room. Sem conexão interrompe o laço (falha para o
      *   WorkManager tentar de novo); erros HTTP de um item não impedem os demais.
+     *
+     * Etapa 2A: o comportamento para pendentes antigos criados por cuidador NÃO foi alterado
+     * (decisão pendente, ver relatório).
      */
     suspend fun syncPending(): Result<Unit> {
         val session = sessionProvider()
