@@ -14,8 +14,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -34,7 +32,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -57,11 +58,17 @@ import com.andre.medalert.ui.theme.MedAlertTextSecondary
 import com.andre.medalert.viewmodel.HomeDoseUi
 import com.andre.medalert.viewmodel.HomeViewModel
 
+/** Quantas doses a lista compacta mostra antes do "Ver todas". */
+private const val COMPACT_LIMIT = 4
+
 /**
  * Home com dados reais: nome salvo na sessão e doses previstas calculadas a partir do Room.
- * Uma dose aparece como "Tomado" quando foi registrada pela notificação ("Tomar agora").
+ * Uma dose aparece como "Tomado" quando foi registrada pela notificação ("Tomar agora") ou pela Home.
  * O número de responsáveis depende de um endpoint de listagem que ainda não existe no backend.
  * As permissões de notificação/alarme exato são pedidas por um popup ao entrar no app.
+ *
+ * Estrutura: cabeçalho, (banner do cuidador), NextMedicationCard, resumo do dia, lista compacta
+ * de próximas doses (com "Ver todas as doses de hoje") e os cards de estatística.
  */
 @Composable
 fun HomeScreen(
@@ -74,6 +81,7 @@ fun HomeScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    var showAll by rememberSaveable { mutableStateOf(false) }
 
     // Resultado de "Registrar" (dose registrada, já registrada, erro).
     LaunchedEffect(viewModel) {
@@ -121,43 +129,72 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
-            if (state.upcomingTimes.isNotEmpty()) {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(state.upcomingTimes) { time -> UpcomingTimeChip(time) }
-                }
-                Spacer(modifier = Modifier.height(24.dp))
-            }
-
-            Text(
-                text = "Medicamentos de hoje",
-                color = MedAlertTextPrimary,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold
+            // Card principal: próxima dose com cronômetro.
+            NextMedicationCard(
+                doses = state.dosesToday,
+                onRegister = { dose -> viewModel.registerDose(dose) }
             )
 
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            Text(
-                text = "${state.dosesToday.size} " +
-                        (if (state.dosesToday.size == 1) "dose prevista" else "doses previstas") +
-                        " • ${state.medicationsToday} " +
-                        (if (state.medicationsToday == 1) "medicamento" else "medicamentos"),
-                color = MedAlertTextSecondary,
-                fontSize = 12.sp
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            if (state.dosesToday.isEmpty()) {
-                Text(
-                    text = "Nenhuma dose prevista para hoje.",
-                    color = MedAlertTextSecondary,
-                    fontSize = 14.sp
+            if (state.dosesToday.isNotEmpty()) {
+                TodaySummary(
+                    taken = state.dosesToday.count { it.isTaken },
+                    total = state.dosesToday.size,
+                    medications = state.medicationsToday
                 )
-            } else {
-                state.dosesToday.forEach { dose ->
-                    MedicationDoseRow(dose, onRegister = { viewModel.registerDose(dose) })
-                    Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // A dose em destaque no card não se repete na lista (granularidade do ticker de 30 s).
+                val featuredKey = remember(state.dosesToday) {
+                    (NextDoseSelector.select(state.dosesToday, System.currentTimeMillis())
+                            as? NextDoseCardState.Pending)?.dose?.key
+                }
+                val upcoming = remember(state.dosesToday, featuredKey) {
+                    state.dosesToday
+                        .filter { !it.isTaken && it.key != featuredKey }
+                        .sortedBy { it.scheduledAtMillis }
+                }
+                val visible = upcoming.take(COMPACT_LIMIT)
+
+                Text(
+                    text = if (showAll) "Doses de hoje" else "Próximas doses",
+                    color = MedAlertTextPrimary,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (showAll) {
+                    state.dosesToday.forEach { dose ->
+                        MedicationDoseRow(dose, onRegister = { viewModel.registerDose(dose) })
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+                } else if (visible.isEmpty()) {
+                    Text(
+                        text = "Nenhuma outra dose pendente hoje.",
+                        color = MedAlertTextSecondary,
+                        fontSize = 14.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                } else {
+                    visible.forEach { dose ->
+                        CompactDoseRow(dose, onRegister = { viewModel.registerDose(dose) })
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                }
+
+                if (showAll || state.dosesToday.size > visible.size) {
+                    TextButton(onClick = { showAll = !showAll }) {
+                        Text(
+                            text = if (showAll) "Mostrar menos"
+                            else "Ver todas as doses de hoje (${state.dosesToday.size})",
+                            color = MedAlertPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
 
@@ -282,22 +319,129 @@ private fun LinkedPatientBanner(patientName: String?) {
     }
 }
 
+/** Resumo do dia: doses registradas / previstas, com barra de progresso discreta. */
 @Composable
-private fun UpcomingTimeChip(time: String) {
-    Box(
+private fun TodaySummary(taken: Int, total: Int, medications: Int) {
+    Column(
         modifier = Modifier
+            .fillMaxWidth()
             .background(MedAlertCard, shape = RoundedCornerShape(16.dp))
-            .padding(horizontal = 24.dp, vertical = 14.dp)
+            .padding(16.dp)
     ) {
-        Text(
-            text = time,
-            color = MedAlertPrimary,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Resumo de hoje",
+                    color = MedAlertTextPrimary,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "$total " + (if (total == 1) "dose prevista" else "doses previstas") +
+                            " • $medications " + (if (medications == 1) "medicamento" else "medicamentos"),
+                    color = MedAlertTextSecondary,
+                    fontSize = 12.sp
+                )
+            }
+            Text(
+                text = "$taken de $total",
+                color = MedAlertPrimary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        val fraction = if (total > 0) taken.toFloat() / total else 0f
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(6.dp)
+                .background(MedAlertBackground, RoundedCornerShape(3.dp))
+        ) {
+            if (fraction > 0f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(fraction)
+                        .height(6.dp)
+                        .background(MedAlertPrimary, RoundedCornerShape(3.dp))
+                )
+            }
+        }
     }
 }
 
+/** Linha compacta das próximas doses. Doses que já passaram mantêm o "Registrar". */
+@Composable
+private fun CompactDoseRow(dose: HomeDoseUi, onRegister: () -> Unit) {
+    val details = listOf(dose.dosage, dose.quantity)
+        .filter { it.isNotBlank() }
+        .joinToString(" · ")
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MedAlertCard, shape = RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .background(
+                    if (dose.isPast) MedAlertBackground else MedAlertPrimary.copy(alpha = 0.15f),
+                    shape = CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Medication,
+                contentDescription = null,
+                tint = if (dose.isPast) MedAlertTextSecondary else MedAlertPrimary,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                dose.medicationName,
+                color = MedAlertTextPrimary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold
+            )
+            if (details.isNotBlank()) {
+                Text(details, color = MedAlertTextSecondary, fontSize = 12.sp)
+            }
+        }
+
+        Text(
+            text = dose.time,
+            color = if (dose.isPast) MedAlertTextSecondary else MedAlertTextPrimary,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        if (dose.isPast) {
+            TextButton(onClick = onRegister) {
+                Text(
+                    text = "Registrar",
+                    color = MedAlertPrimary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+    }
+}
+
+/** Linha completa (a original), usada em "Ver todas as doses de hoje". */
 @Composable
 private fun MedicationDoseRow(dose: HomeDoseUi, onRegister: () -> Unit) {
     val iconColor = when {

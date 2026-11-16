@@ -52,7 +52,9 @@ data class HomeDoseUi(
     val time: String,
     val isPast: Boolean,
     /** true quando a dose foi registrada como tomada (pela notificação). */
-    val isTaken: Boolean = false
+    val isTaken: Boolean = false,
+    /** Quantidade cadastrada do medicamento (ex.: "1 comprimido"); vazio se o Room não tem. */
+    val quantity: String = ""
 )
 
 data class HomeUiState(
@@ -241,8 +243,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val zone = ZoneId.systemDefault()
         val doses = DoseScheduleCalculator.dosesOnDay(active, today)
 
+        // Quantidade vem do mesmo medicamento do Room (mesmo formato do MedicationMapper).
+        val byId = active.associateBy { it.id }
+
         val dosesUi = doses.map {
             val scheduledMillis = it.at.atZone(zone).toInstant().toEpochMilli()
+            val entity = byId[it.medicationLocalId]
+            val quantity = entity?.quantidade
+                ?.let { q -> listOfNotNull(q.toString(), entity.unidadeQuantidade).joinToString(" ") }
+                .orEmpty()
             HomeDoseUi(
                 key = "${it.medicationLocalId}-${it.at}",
                 medicationLocalId = it.medicationLocalId,
@@ -251,7 +260,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 dosage = it.dosage,
                 time = it.at.format(HORA_FORMAT),
                 isPast = it.at.isBefore(now),
-                isTaken = "${it.medicationLocalId}-$scheduledMillis" in takenKeys
+                isTaken = "${it.medicationLocalId}-$scheduledMillis" in takenKeys,
+                quantity = quantity
             )
         }
 
