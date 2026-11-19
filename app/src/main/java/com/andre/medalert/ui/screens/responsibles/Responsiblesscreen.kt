@@ -47,6 +47,7 @@ import com.andre.medalert.data.repository.ResponsavelRepositoryApi
 import com.andre.medalert.data.local.UserPreferencesRepository
 import androidx.compose.ui.platform.LocalContext
 import com.andre.medalert.data.repository.ResponsavelRepository
+import com.andre.medalert.data.repository.STATUS_VINCULO_ATIVO
 import com.andre.medalert.ui.components.EmptyState
 import com.andre.medalert.ui.components.ErrorState
 import com.andre.medalert.ui.components.LoadingState
@@ -66,9 +67,10 @@ private sealed interface ResponsiblesUiState {
 }
 
 /**
- * Tela "Responsáveis". Lista e remoção são mock (não há GET/DELETE na
- * API ainda); "Adicionar" já monta os dados no formato de
- * POST /api/users/cuid (ver [ResponsavelRepository.adicionar]).
+ * Tela "Responsáveis". A API não informa quem aceitou o convite (não há rota de listagem), então a
+ * lista mostra os convites ENVIADOS a partir deste aparelho, com o status "Convite enviado".
+ * Só aparece "Vínculo ativo" quando existir uma fonte confirmada para isso. "Remover" apaga só o
+ * registro local do convite; não desfaz um vínculo já aceito.
  *
  * `reloadKey`: incremente esse valor de fora (ex.: ao voltar da tela de
  * adicionar) para forçar a tela a recarregar a lista.
@@ -166,13 +168,24 @@ fun ResponsiblesScreen(
                                 )
                                 Spacer(modifier = Modifier.height(10.dp))
                             }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Por enquanto o aplicativo não consegue confirmar quando o responsável aceita o convite. Esta lista mostra os convites enviados a partir deste aparelho.",
+                                color = MedAlertTextSecondary,
+                                fontSize = 12.sp
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
                         }
                     }
                 }
             }
         }
 
-        // Botão fixo, sempre visível (igual ao padrão das outras telas de formulário).
+        // Botão fixo, sempre visível (igual ao padrão das outras telas de formulário). Sem a
+        // confirmação do aceite o paciente nunca fica sem poder convidar de novo.
+        val hasResponsaveis =
+            (uiState as? ResponsiblesUiState.Success)?.responsaveis?.isNotEmpty() == true
         Button(
             onClick = onAddClick,
             modifier = Modifier
@@ -186,7 +199,11 @@ fun ResponsiblesScreen(
                 contentColor = MedAlertBackground
             )
         ) {
-            Text("Adicionar responsável", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(
+                text = if (hasResponsaveis) "Convidar outro responsável" else "Adicionar responsável",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
         }
     }
 
@@ -195,18 +212,18 @@ fun ResponsiblesScreen(
             onDismissRequest = { responsavelParaRemover = null },
             containerColor = MedAlertCard,
             title = {
-                Text("Remover responsável?", color = MedAlertTextPrimary, fontWeight = FontWeight.Bold)
+                Text("Remover convite?", color = MedAlertTextPrimary, fontWeight = FontWeight.Bold)
             },
             text = {
                 Text(
-                    "${responsavel.nome} deixará de acompanhar seu tratamento.",
+                    "${responsavel.nome} será removido da lista deste aparelho. Isso não desfaz um vínculo que já tenha sido aceito.",
                     color = MedAlertTextSecondary
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
                     scope.launch {
-                        repository.remover(responsavel.id)
+                        runCatching { repository.remover(responsavel.id) }
                         responsavelParaRemover = null
                         carregar()
                     }
@@ -228,6 +245,11 @@ private fun ResponsavelCard(
     responsavel: ResponsavelUiModel,
     onRemoveClick: () -> Unit
 ) {
+    // Verde é só para vínculo ativo (confirmado). Convite enviado usa a cor de destaque neutra.
+    val statusColor =
+        if (responsavel.status.equals(STATUS_VINCULO_ATIVO, ignoreCase = true)) MedAlertStatusGreen
+        else MedAlertPrimary
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -260,12 +282,12 @@ private fun ResponsavelCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
-                        .background(MedAlertStatusGreen.copy(alpha = 0.15f), shape = RoundedCornerShape(8.dp))
+                        .background(statusColor.copy(alpha = 0.15f), shape = RoundedCornerShape(8.dp))
                         .padding(horizontal = 8.dp, vertical = 3.dp)
                 ) {
                     Text(
                         text = responsavel.status,
-                        color = MedAlertStatusGreen,
+                        color = statusColor,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -278,7 +300,7 @@ private fun ResponsavelCard(
         IconButton(onClick = onRemoveClick) {
             Icon(
                 imageVector = Icons.Filled.Delete,
-                contentDescription = "Remover responsável",
+                contentDescription = "Remover convite",
                 tint = MedAlertTextSecondary,
                 modifier = Modifier.size(20.dp)
             )

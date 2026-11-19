@@ -2,25 +2,52 @@ package com.andre.medalert.data.repository
 
 import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.model.ResponsavelUiModel
+import com.andre.medalert.data.model.SentInvite
 import com.andre.medalert.data.remote.ApiService
 import com.andre.medalert.data.remote.RetrofitClient
 import com.andre.medalert.data.remote.dto.RequestCuidadorRequest
 import com.andre.medalert.data.session.AccessPolicy
 import kotlinx.coroutines.flow.first
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 /** Falta endpoint/contrato no backend para a operação pedida. */
 class BackendDependencyException(message: String) : Exception(message)
 
+/** Estado conhecido de um responsável na lista. Só o convite enviado é conhecido hoje. */
+const val STATUS_CONVITE_ENVIADO = "Convite enviado"
+
+/**
+ * Reservado para quando existir uma rota que liste os cuidadores vinculados ao paciente.
+ * Hoje nada no app produz este status: o aceite acontece no aparelho do cuidador e a API não
+ * avisa o paciente.
+ */
+const val STATUS_VINCULO_ATIVO = "Vínculo ativo"
+
 /**
  * Abstração dos dados de Responsáveis.
  *
- * DEPENDÊNCIA DO BACKEND: não existe endpoint de listagem nem de remoção de responsáveis.
- * Só existe o convite (POST /api/users/requestCuidador), ligado em [ResponsavelRepositoryApi].
+ * DEPENDÊNCIA DO BACKEND: não existe endpoint que liste os cuidadores vinculados a um paciente
+ * nem que remova um vínculo. Só existe o convite (POST /api/users/requestCuidador).
  */
 interface ResponsavelRepository {
     suspend fun listar(): List<ResponsavelUiModel>
     suspend fun adicionar(nome: String, email: String): ResponsavelUiModel
     suspend fun remover(id: String)
+}
+
+private val DATA_ENVIO: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy")
+
+private fun SentInvite.toUiModel(): ResponsavelUiModel {
+    val dia = Instant.ofEpochMilli(sentAtMillis).atZone(ZoneId.systemDefault()).toLocalDate()
+    return ResponsavelUiModel(
+        id = email,
+        nome = nome,
+        email = email,
+        relacao = "Enviado em ${dia.format(DATA_ENVIO)}",
+        status = STATUS_CONVITE_ENVIADO
+    )
 }
 
 /**
@@ -29,18 +56,25 @@ interface ResponsavelRepository {
  * ter um token FCM registrado, senão a API responde erro).
  *
  * O campo "nome" segue o comentário do contrato no projeto (nome do PACIENTE, exibido no convite);
- * se a API esperar o nome do cuidador, trocar só em [adicionar]. O nome digitado na tela aparece
- * no resultado local apenas.
+ * se a API esperar o nome do cuidador, trocar só em [adicionar].
  *
- * Sem endpoint de listagem/remoção: [listar] devolve vazio (sem inventar dados) e [remover]
- * avisa a dependência.
+ * Lista: como a API não informa quem aceitou, [listar] devolve os convites ENVIADOS a partir deste
+ * aparelho (guardados no DataStore, por paciente), todos com o status "Convite enviado". Nada é
+ * apresentado como vínculo ativo. Trocar de aparelho ou reinstalar o app perde esse registro.
+ *
+ * Remover: apaga só o registro local do convite. NÃO desfaz um vínculo já aceito (não há rota).
  */
 class ResponsavelRepositoryApi(
     private val prefs: UserPreferencesRepository,
     private val api: ApiService = RetrofitClient.instance
 ) : ResponsavelRepository {
 
-    override suspend fun listar(): List<ResponsavelUiModel> = emptyList()
+    override suspend fun listar(): List<ResponsavelUiModel> {
+        val session = prefs.session.first()
+        if (AccessPolicy.isCaregiver(session.tipo)) return emptyList()
+        val patientId = session.userId?.takeIf { it > 0 } ?: return emptyList()
+        return prefs.sentInvites(patientId).first().map { it.toUiModel() }
+    }
 
     override suspend fun adicionar(nome: String, email: String): ResponsavelUiModel {
         val session = prefs.session.first()
@@ -51,20 +85,24 @@ class ResponsavelRepositoryApi(
             ?: throw IllegalStateException("Sessão expirada. Faça login novamente.")
         val patientName = prefs.userName.first() ?: "Paciente"
 
+        // Falha da API (HTTP ou rede) lança exceção aqui: nada é guardado sem o envio ter dado certo.
         api.requestCuidador(
             RequestCuidadorRequest(email = email, nome = patientName, userId = patientId)
         ).close()
 
-        return ResponsavelUiModel(
-            id = email,
-            nome = nome,
-            email = email,
-            relacao = "",
-            status = "Convite enviado"
+        val invite = SentInvite(
+            nome = nome.trim(),
+            email = email.trim(),
+            sentAtMillis = System.currentTimeMillis()
         )
+        prefs.addSentInvite(patientId, invite)
+        return invite.toUiModel()
     }
 
     override suspend fun remover(id: String) {
-        throw BackendDependencyException("Não existe endpoint para remover responsáveis.")
+        val session = prefs.session.first()
+        val patientId = session.userId?.takeIf { it > 0 && !AccessPolicy.isCaregiver(session.tipo) }
+            ?: throw IllegalStateException("Sessão expirada. Faça login novamente.")
+        prefs.removeSentInvite(patientId, id)
     }
 }

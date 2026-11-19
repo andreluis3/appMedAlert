@@ -23,18 +23,16 @@ sealed interface AlarmTarget {
  * Regras de acesso paciente x cuidador, num lugar só e sem dependência de Android
  * (por isso é testável em JVM).
  *
- * O PACIENTE é sempre o dono dos dados clínicos:
+ * O PACIENTE é sempre o dono dos dados clínicos e o ÚNICO que escreve:
  * - Paciente: lê e altera (cadastra, edita, exclui) os PRÓPRIOS medicamentos e registra as
- *   próprias administrações.
- * - Cuidador COM vínculo válido (pacienteId > 0): lê, EDITA e EXCLUI os medicamentos do paciente
- *   vinculado, mas NÃO cadastra medicamentos novos. Nada é gravado com o id do cuidador: o dono é
- *   sempre o pacienteId.
- * - Registro de dose: o comportamento atual foi mantido na Etapa 2A (paciente e cuidador
- *   vinculado). A regra definitiva (cuidador não registra dose) será aplicada na etapa de histórico.
+ *   próprias administrações de dose.
+ * - Cuidador COM vínculo válido (pacienteId > 0): SOMENTE LEITURA. Visualiza medicamentos,
+ *   dosagens, horários, doses previstas, histórico e adesão do paciente vinculado, mas NÃO
+ *   cadastra, NÃO edita, NÃO exclui e NÃO registra dose. Nada é gravado com o id do cuidador.
  * - Cuidador SEM vínculo, ou sem sessão: não lê nem altera nada.
  * - Sessões antigas sem tipo são tratadas como paciente.
  *
- * Esta política só decide o que a INTERFACE e a camada de dados do Android oferecem. A segurança
+ * Esta política decide o que a INTERFACE e a camada de dados do Android oferecem. A segurança
  * real (token + vínculo cuidador/paciente) precisa ser validada pela API em cada rota.
  */
 object AccessPolicy {
@@ -45,8 +43,15 @@ object AccessPolicy {
     fun isCaregiver(tipo: String?): Boolean =
         tipo?.trim().equals(TIPO_CUIDADOR, ignoreCase = true)
 
+    /**
+     * Sessão de PACIENTE válida (userId > 0): o único perfil que escreve dados clínicos.
+     * Todas as permissões de escrita abaixo partem desta regra.
+     */
+    private fun isPatientSession(tipo: String?, userId: Int?, pacienteId: Int?): Boolean =
+        !isCaregiver(tipo) && (userId ?: 0) > 0 && patientIdFor(tipo, userId, pacienteId) != null
+
     // ---------------------------------------------------------------------------
-    // Medicamentos: cadastrar, editar, excluir
+    // Medicamentos: cadastrar, editar, excluir (somente o paciente)
     // ---------------------------------------------------------------------------
 
     /**
@@ -54,30 +59,26 @@ object AccessPolicy {
      * Cuidador, mesmo vinculado, não cadastra.
      */
     fun canAddMedications(tipo: String?, userId: Int?, pacienteId: Int?): Boolean =
-        !isCaregiver(tipo) && (userId ?: 0) > 0 && patientIdFor(tipo, userId, pacienteId) != null
+        isPatientSession(tipo, userId, pacienteId)
 
-    /**
-     * EDITAR medicamento existente.
-     * - Paciente: precisa de sessão válida (userId > 0).
-     * - Cuidador: precisa de sessão válida E de paciente vinculado (pacienteId > 0).
-     */
+    /** EDITAR medicamento existente: só o PACIENTE. O cuidador vinculado apenas visualiza. */
     fun canEditMedications(tipo: String?, userId: Int?, pacienteId: Int?): Boolean =
-        (userId ?: 0) > 0 && patientIdFor(tipo, userId, pacienteId) != null
+        isPatientSession(tipo, userId, pacienteId)
 
-    /** EXCLUIR medicamento existente. Mesmas condições de [canEditMedications]. */
+    /** EXCLUIR medicamento existente: só o PACIENTE. O cuidador vinculado apenas visualiza. */
     fun canDeleteMedications(tipo: String?, userId: Int?, pacienteId: Int?): Boolean =
-        (userId ?: 0) > 0 && patientIdFor(tipo, userId, pacienteId) != null
+        isPatientSession(tipo, userId, pacienteId)
 
     /**
      * Compatibilidade: alterar um medicamento JÁ EXISTENTE (editar ou excluir). Não inclui
-     * cadastrar: para isso use [canAddMedications].
+     * cadastrar: para isso use [canAddMedications]. Hoje as três regras são iguais (só paciente).
      */
     fun canManageMedications(tipo: String?, userId: Int?, pacienteId: Int?): Boolean =
         canEditMedications(tipo, userId, pacienteId)
 
     /**
      * Paciente DONO dos medicamentos que a sessão pode editar, excluir ou enviar (pendentes): o
-     * próprio paciente, ou o paciente vinculado ao cuidador. null quando a sessão não pode.
+     * próprio paciente. null para cuidador (mesmo vinculado) e sem sessão.
      */
     fun medicationOwnerIdFor(tipo: String?, userId: Int?, pacienteId: Int?): Int? =
         if (canManageMedications(tipo, userId, pacienteId)) {
@@ -99,9 +100,9 @@ object AccessPolicy {
 
     /**
      * A sessão pode alterar (editar ou excluir) ESTE medicamento? Exige poder alterar medicamentos
-     * E que o medicamento pertença ao paciente autorizado da sessão ([medicationOwnerId] = `userId`
-     * da linha no Room). Impede, por exemplo, que um cuidador altere medicamento de outro paciente
-     * que ficou em cache.
+     * E que o medicamento pertença ao paciente da sessão ([medicationOwnerId] = `userId` da linha
+     * no Room). Impede, por exemplo, que um medicamento de outro paciente que ficou em cache seja
+     * alterado.
      */
     fun canManageMedication(
         tipo: String?,
@@ -118,12 +119,11 @@ object AccessPolicy {
     // ---------------------------------------------------------------------------
 
     /**
-     * Registrar administração de dose: paciente (a própria) e cuidador (do paciente vinculado).
-     * Exige haver um paciente-alvo: cuidador sem vínculo e sessão vazia não registram nada.
-     * (Mantido como estava na Etapa 2A.)
+     * Registrar administração de dose: só o PACIENTE, a própria. O cuidador acompanha mas nunca
+     * registra (Home, notificações e qualquer outro caminho passam por esta regra).
      */
     fun canRegisterDose(tipo: String?, userId: Int?, pacienteId: Int?): Boolean =
-        patientIdFor(tipo, userId, pacienteId) != null
+        isPatientSession(tipo, userId, pacienteId)
 
     /** Consultar o histórico de administrações: paciente (o próprio) e cuidador vinculado. */
     fun canViewHistory(tipo: String?, userId: Int?, pacienteId: Int?): Boolean =

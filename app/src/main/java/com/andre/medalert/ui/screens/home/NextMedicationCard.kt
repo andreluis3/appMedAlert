@@ -53,14 +53,23 @@ private val AlertRed = Color(0xFFE5484D)
 /**
  * Card em destaque com a próxima dose. Recebe as doses de hoje (já calculadas pelo HomeViewModel)
  * e usa um relógio próprio de 1 s, que só recompõe este card (o resto da Home continua com o
- * ticker de 30 s do ViewModel). Registrar usa o mesmo callback da lista (HomeViewModel.registerDose),
- * então valem as mesmas regras de paciente/cuidador.
+ * ticker de 30 s do ViewModel).
+ *
+ * [canRegister]: só o PACIENTE registra dose. Para o cuidador (somente leitura) o botão
+ * "Registrar dose" não aparece. Começa false de propósito: quem chama decide explicitamente.
+ * O HomeViewModel.registerDose e o DoseIntakeRegistrar também recusam o cuidador.
+ *
+ * [caregiverView]: visão do cuidador. Ele ainda não recebe a confirmação de que a dose foi
+ * tomada, então o card NÃO afirma "atrasada" nem usa vermelho: diz que o horário passou e que
+ * não há confirmação de tomada neste aparelho.
  */
 @Composable
 fun NextMedicationCard(
     doses: List<HomeDoseUi>,
     onRegister: (HomeDoseUi) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    canRegister: Boolean = false,
+    caregiverView: Boolean = false
 ) {
     val now = rememberNowMillis()
 
@@ -84,6 +93,8 @@ fun NextMedicationCard(
         is NextDoseCardState.Pending -> PendingContent(
             modifier = modifier,
             state = state,
+            canRegister = canRegister,
+            caregiverView = caregiverView,
             onRegister = onRegister
         )
     }
@@ -151,31 +162,33 @@ private fun MessageCard(
 private fun PendingContent(
     modifier: Modifier,
     state: NextDoseCardState.Pending,
+    canRegister: Boolean,
+    caregiverView: Boolean,
     onRegister: (HomeDoseUi) -> Unit
 ) {
     val dose = state.dose
     val phase = state.phase
     val overdue = phase == NextDosePhase.OVERDUE
     val due = overdue || phase == NextDosePhase.TIME_TO_TAKE
-    val accent = if (overdue) AlertRed else MedAlertPrimary
+    val accent = if (overdue && !caregiverView) AlertRed else MedAlertPrimary
 
     val borderColor = when (phase) {
         NextDosePhase.WAITING -> null
         NextDosePhase.APPROACHING -> MedAlertPrimary.copy(alpha = 0.35f)
         NextDosePhase.IMMINENT -> MedAlertPrimary.copy(alpha = 0.8f)
         NextDosePhase.TIME_TO_TAKE -> MedAlertPrimary
-        NextDosePhase.OVERDUE -> AlertRed.copy(alpha = 0.7f)
+        NextDosePhase.OVERDUE -> if (caregiverView) null else AlertRed.copy(alpha = 0.7f)
     }
     val tint = when (phase) {
         NextDosePhase.IMMINENT, NextDosePhase.TIME_TO_TAKE -> MedAlertPrimary.copy(alpha = 0.07f)
-        NextDosePhase.OVERDUE -> AlertRed.copy(alpha = 0.06f)
+        NextDosePhase.OVERDUE -> if (caregiverView) null else AlertRed.copy(alpha = 0.06f)
         else -> null
     }
     val chipText = when (phase) {
         NextDosePhase.WAITING -> "Hoje"
         NextDosePhase.APPROACHING, NextDosePhase.IMMINENT -> "Em breve"
-        NextDosePhase.TIME_TO_TAKE -> "Agora"
-        NextDosePhase.OVERDUE -> "Atrasada"
+        NextDosePhase.TIME_TO_TAKE -> if (caregiverView) "No horário" else "Agora"
+        NextDosePhase.OVERDUE -> if (caregiverView) "Já passou" else "Atrasada"
     }
 
     CardShell(modifier = modifier, borderColor = borderColor, tint = tint) {
@@ -204,7 +217,11 @@ private fun PendingContent(
         Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
             when (phase) {
                 NextDosePhase.WAITING, NextDosePhase.APPROACHING, NextDosePhase.IMMINENT -> {
-                    Text("Seu próximo medicamento será em:", color = MedAlertTextSecondary, fontSize = 13.sp)
+                    Text(
+                        if (caregiverView) "Próxima dose do paciente em:" else "Seu próximo medicamento será em:",
+                        color = MedAlertTextSecondary,
+                        fontSize = 13.sp
+                    )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = formatCountdown(state.millisUntil),
@@ -217,19 +234,40 @@ private fun PendingContent(
                 }
 
                 NextDosePhase.TIME_TO_TAKE -> {
-                    Text("Hora de tomar!", color = MedAlertPrimary, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (caregiverView) "Dose no horário" else "Hora de tomar!",
+                        color = MedAlertPrimary,
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text("Dose prevista para ${dose.time}", color = MedAlertTextSecondary, fontSize = 13.sp)
                 }
 
                 NextDosePhase.OVERDUE -> {
-                    Text("Dose atrasada", color = AlertRed, fontSize = 26.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        "Prevista para ${dose.time} • ${formatElapsed(-state.millisUntil)}",
-                        color = MedAlertTextSecondary,
-                        fontSize = 13.sp
-                    )
+                    if (caregiverView) {
+                        // Sem confirmação de tomada, o app não pode afirmar que a dose está atrasada.
+                        Text("Horário já passou", color = MedAlertTextPrimary, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            "Prevista para ${dose.time} • ${formatElapsed(-state.millisUntil)}",
+                            color = MedAlertTextSecondary,
+                            fontSize = 13.sp
+                        )
+                        Text(
+                            "Sem confirmação de tomada neste aparelho",
+                            color = MedAlertTextSecondary,
+                            fontSize = 12.sp
+                        )
+                    } else {
+                        Text("Dose atrasada", color = AlertRed, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            "Prevista para ${dose.time} • ${formatElapsed(-state.millisUntil)}",
+                            color = MedAlertTextSecondary,
+                            fontSize = 13.sp
+                        )
+                    }
                 }
             }
         }
@@ -288,8 +326,8 @@ private fun PendingContent(
                 }
             }
 
-            // Mesma regra da lista: só registra dose cujo horário já chegou.
-            if (due) {
+            // Só registra dose cujo horário já chegou, e só o paciente (cuidador é somente leitura).
+            if (due && canRegister) {
                 Button(
                     onClick = { onRegister(dose) },
                     modifier = Modifier.height(44.dp),

@@ -28,7 +28,8 @@ data class LinkedPatientProfile(
 /**
  * Fonte central de "de quem são os dados e quem está mexendo neles". Sem dependência de Android
  * (testável em JVM). É calculado a partir da sessão do DataStore ([SessionInfo]) e do
- * [AccessPolicy]: não existe regra duplicada aqui.
+ * [AccessPolicy]: as permissões abaixo precisam coincidir com as da política (há teste que
+ * confere todas as combinações).
  *
  * - [userId]: usuário autenticado (paciente ou cuidador).
  * - [patientId]: paciente DONO dos dados clínicos. Paciente = ele mesmo; cuidador = o paciente
@@ -37,6 +38,9 @@ data class LinkedPatientProfile(
  * - [patientName]: nome do paciente quando conhecido; null caso contrário. NUNCA é o nome do
  *   cuidador. Para cuidador só existe depois que o backend disponibilizar o perfil do paciente e
  *   o nome for salvo (ver [PatientContextProvider.savePatientName]).
+ *
+ * Permissões: só o PACIENTE escreve (cadastra, edita, exclui medicamentos e registra doses). O
+ * cuidador vinculado só visualiza.
  */
 data class PatientContext(
     val userId: Int?,
@@ -53,11 +57,15 @@ data class PatientContext(
         get() = linkState == LinkState.PATIENT
 
     /**
-     * Editar e excluir medicamentos do [patientId]: paciente e cuidador vinculado.
-     * Igual a [AccessPolicy.canManageMedications]. NÃO inclui cadastrar.
+     * Editar e excluir medicamentos do [patientId]: só o paciente. O cuidador vinculado só
+     * visualiza. Igual a [AccessPolicy.canManageMedications]. NÃO inclui cadastrar.
      */
     val canManageMedications: Boolean
-        get() = linkState == LinkState.PATIENT || linkState == LinkState.CAREGIVER_LINKED
+        get() = linkState == LinkState.PATIENT
+
+    /** Registrar dose como tomada: só o paciente. Igual a [AccessPolicy.canRegisterDose]. */
+    val canRegisterDoses: Boolean
+        get() = linkState == LinkState.PATIENT
 
     val isAwaitingLink: Boolean get() = linkState == LinkState.CAREGIVER_AWAITING_LINK
 

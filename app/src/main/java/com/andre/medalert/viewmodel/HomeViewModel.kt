@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.andre.medalert.data.local.AppDatabase
 import com.andre.medalert.data.local.entity.MedicationEntity
 import com.andre.medalert.data.repository.MedicationRepository
+import com.andre.medalert.data.schedule.CaregiverDoseSchedule
 import com.andre.medalert.data.schedule.DoseScheduleCalculator
 import com.andre.medalert.data.schedule.SessionMedications
 import com.andre.medalert.data.local.UserPreferencesRepository
@@ -31,6 +32,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -71,7 +73,13 @@ data class HomeUiState(
     /** Cuidador vinculado: ID do paciente acompanhado. */
     val linkedPatientId: Int? = null,
     /** Cuidador vinculado: nome do paciente (vem de GET /api/meds/cuid/{id}); null até chegar. */
-    val linkedPatientName: String? = null
+    val linkedPatientName: String? = null,
+    /**
+     * Só o PACIENTE registra doses (o cuidador acompanha em somente leitura). Começa false e só
+     * vira true quando o PatientContext confirma que a sessão é de paciente: assim o botão
+     * "Registrar" nunca aparece, nem por um instante, para o cuidador.
+     */
+    val canRegisterDoses: Boolean = false
 )
 
 private val HORA_FORMAT = DateTimeFormatter.ofPattern("HH:mm")
@@ -132,12 +140,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val awaiting: Boolean,
         val patientId: Int?,
         val patientName: String?,
-        val isCaregiver: Boolean
+        val isCaregiver: Boolean,
+        val canRegisterDoses: Boolean
     )
 
     /**
-     * (aguardando vínculo, paciente vinculado e nome). Vem do PatientContext, então muda sozinho
-     * no aceite, na troca de paciente (o nome antigo some), quando o nome chega do /cuid/ e no logout.
+     * (aguardando vínculo, paciente vinculado e nome, permissão de registrar dose). Vem do
+     * PatientContext, então muda sozinho no aceite, na troca de paciente (o nome antigo some),
+     * quando o nome chega do /cuid/ e no logout.
      */
     private val linkState: Flow<LinkInfo> = PatientContextProvider(prefs).context
         .map { ctx ->
@@ -146,7 +156,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 awaiting = ctx.isAwaitingLink,
                 patientId = linked,
                 patientName = if (linked != null) ctx.patientName else null,
-                isCaregiver = ctx.isCaregiver
+                isCaregiver = ctx.isCaregiver,
+                canRegisterDoses = ctx.canRegisterDoses
             )
         }
         .distinctUntilChanged()
@@ -158,12 +169,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         adherence,
         takenKeys.combine(linkState) { taken, link -> taken to link }
     ) { name, medications, now, adherenceLabel, (taken, link) ->
-        build(name, medications, now, adherenceLabel, taken)
+        build(name, medications, now, adherenceLabel, taken, link.isCaregiver)
             .copy(
                 isCaregiver = link.isCaregiver,
                 awaitingLink = link.awaiting,
                 linkedPatientId = link.patientId,
-                linkedPatientName = link.patientName
+                linkedPatientName = link.patientName,
+                canRegisterDoses = link.canRegisterDoses
             )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
@@ -195,13 +207,21 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Registra a dose como tomada: o paciente registra a própria e o cuidador registra a do
-     * paciente vinculado (a origem fica gravada). O envio à API é agendado pelo registrador.
-     * O índice único do Room e a checagem por ID remoto impedem registrar duas vezes.
+     * Registra a dose como tomada. SÓ O PACIENTE registra a própria dose: o cuidador acompanha em
+     * somente leitura. A permissão é conferida aqui (sessão lida na hora, sem depender da tela)
+     * e de novo no [DoseIntakeRegistrar], que é o ponto central; esconder o botão não basta.
+     * O envio à API é agendado pelo registrador. O índice único do Room e a checagem por ID
+     * remoto impedem registrar duas vezes.
      */
     fun registerDose(dose: HomeDoseUi) {
         if (dose.isTaken) return
         viewModelScope.launch {
+            val session = prefs.session.first()
+            if (!AccessPolicy.canRegisterDose(session.tipo, session.userId, session.pacienteId)) {
+                _messages.tryEmit("Somente o paciente pode registrar doses.")
+                return@launch
+            }
+
             val app = getApplication<Application>()
             val result = DoseIntakeRegistrar.registerTaken(
                 context = app,
@@ -236,12 +256,20 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         medications: List<MedicationEntity>,
         now: LocalDateTime,
         adherenceLabel: String,
-        takenKeys: Set<String>
+        takenKeys: Set<String>,
+        isCaregiver: Boolean
     ): HomeUiState {
         val active = medications.filter { it.ativo }
         val today = now.toLocalDate()
         val zone = ZoneId.systemDefault()
-        val doses = DoseScheduleCalculator.dosesOnDay(active, today)
+        // Paciente: cálculo completo (datas de início/fim). Cuidador: o GET /cuid/ não traz
+        // data_inicio/data_fim, então usa a regra de horários do próprio servidor (ver
+        // CaregiverDoseSchedule). O cálculo do paciente não é alterado.
+        val doses = if (isCaregiver) {
+            CaregiverDoseSchedule.dosesOnDay(active, today)
+        } else {
+            DoseScheduleCalculator.dosesOnDay(active, today)
+        }
 
         // Quantidade vem do mesmo medicamento do Room (mesmo formato do MedicationMapper).
         val byId = active.associateBy { it.id }
@@ -265,7 +293,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
-        val next = DoseScheduleCalculator.nextDoseOverall(active, now)
+        val next = if (isCaregiver) {
+            CaregiverDoseSchedule.nextDoseOverall(active, now)
+        } else {
+            DoseScheduleCalculator.nextDoseOverall(active, now)
+        }
         val nextLabel = when {
             next == null -> "Nenhuma dose prevista"
             next.at.toLocalDate() == today ->

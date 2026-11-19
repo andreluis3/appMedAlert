@@ -7,8 +7,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Inventory2
@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -29,12 +30,30 @@ import androidx.compose.ui.unit.sp
 import com.andre.medalert.data.model.Medication
 import com.andre.medalert.ui.components.BottomNavigationBar
 import com.andre.medalert.ui.components.CaregiverAwaitingLinkState
+import com.andre.medalert.ui.components.EmptyState
+import com.andre.medalert.ui.components.ErrorState
+import com.andre.medalert.ui.components.LoadingState
 import com.andre.medalert.ui.theme.MedAlertBackground
 import com.andre.medalert.ui.theme.MedAlertCard
 import com.andre.medalert.ui.theme.MedAlertPrimary
+import com.andre.medalert.ui.theme.MedAlertStatusRed
 import com.andre.medalert.ui.theme.MedAlertTextPrimary
 import com.andre.medalert.ui.theme.MedAlertTextSecondary
 
+/**
+ * Tela "Remédios" para os dois perfis.
+ *
+ * - Paciente: vê os próprios medicamentos, cadastra (botão "Adicionar"), edita e exclui.
+ * - Cuidador: [readOnly] = true e [canAdd] = false. Só visualiza (nome, dosagem e o que mais o
+ *   aparelho souber); sem Adicionar, Editar, Excluir nem o selo "Ativo".
+ * - Cuidador sem paciente vinculado: [awaitingLink] = true mostra o aviso de vínculo.
+ *
+ * Estados (nesta ordem): lista com dados > carregando > erro com "Tentar de novo" > vazio.
+ * Com lista e erro/carregamento ao mesmo tempo, a lista continua visível e o aviso aparece em cima.
+ *
+ * [managingForPatient] é mantido só por compatibilidade com quem chama; não muda mais a tela
+ * (o cuidador não gerencia medicamentos).
+ */
 @Composable
 fun MedicationsScreen(
     medications: List<Medication> = emptyList(),
@@ -44,10 +63,12 @@ fun MedicationsScreen(
     onEditClick: (Medication) -> Unit = {},
     onDeleteConfirm: (Medication) -> Unit = {},
     readOnly: Boolean = false,
-    // Adicione o parâmetro canAdd aqui:
     canAdd: Boolean = true,
     managingForPatient: Boolean = false,
-    awaitingLink: Boolean = false
+    awaitingLink: Boolean = false,
+    isLoading: Boolean = false,
+    onRetryClick: () -> Unit = {},
+    onDismissError: () -> Unit = {}
 ) {
     var medicationToDelete by remember { mutableStateOf<Medication?>(null) }
 
@@ -57,8 +78,6 @@ fun MedicationsScreen(
             BottomNavigationBar(selectedRoute = "medications", onItemClick = onNavigate)
         }
     ) { innerPadding ->
-        // ... (resto do seu código permanece igual)
-
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -67,11 +86,85 @@ fun MedicationsScreen(
                 .padding(horizontal = 20.dp)
                 .padding(top = 20.dp, bottom = 24.dp)
         ) {
-            // ... (código de cabeçalho e lista)
+            MedicationsHeader(readOnly = readOnly, awaitingLink = awaitingLink)
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            if (awaitingLink) {
+                // Cuidador sem vínculo: altura fixa, pois estamos numa coluna rolável.
+                Box(modifier = Modifier.fillMaxWidth().height(360.dp)) {
+                    CaregiverAwaitingLinkState()
+                }
+                return@Column
+            }
+
+            // Falha ao atualizar (ou ao excluir) com a lista já na tela: não esconde o erro.
+            if (errorMessage != null && medications.isNotEmpty()) {
+                ErrorBanner(
+                    message = errorMessage,
+                    onRetryClick = onRetryClick,
+                    onDismiss = onDismissError
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            // Atualizando por cima de uma lista que já existe (Room).
+            if (isLoading && medications.isNotEmpty()) {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MedAlertPrimary,
+                    trackColor = MedAlertCard
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            when {
+                medications.isNotEmpty() -> {
+                    medications.forEach { medication ->
+                        key(medication.localId) {
+                            MedicationCard(
+                                medication = medication,
+                                readOnly = readOnly,
+                                onEditClick = { onEditClick(medication) },
+                                onDeleteClick = { medicationToDelete = medication }
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                        }
+                    }
+                }
+
+                isLoading -> {
+                    Box(modifier = Modifier.fillMaxWidth().height(360.dp)) {
+                        LoadingState()
+                    }
+                }
+
+                errorMessage != null -> {
+                    Box(modifier = Modifier.fillMaxWidth().height(360.dp)) {
+                        ErrorState(
+                            title = errorMessage,
+                            onRetryClick = onRetryClick
+                        )
+                    }
+                }
+
+                else -> {
+                    Box(modifier = Modifier.fillMaxWidth().height(360.dp)) {
+                        EmptyState(
+                            icon = Icons.Filled.Medication,
+                            title = "Nenhum medicamento cadastrado.",
+                            message = if (canAdd) {
+                                "Toque em \"Adicionar medicamento\" para cadastrar o primeiro."
+                            } else {
+                                "O paciente ainda não cadastrou medicamentos."
+                            }
+                        )
+                    }
+                }
+            }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Agora 'canAdd' será reconhecido corretamente aqui:
             if (!readOnly && canAdd) {
                 Button(
                     onClick = onAddClick,
@@ -100,6 +193,61 @@ fun MedicationsScreen(
                 medicationToDelete = null
             }
         )
+    }
+}
+
+@Composable
+private fun MedicationsHeader(readOnly: Boolean, awaitingLink: Boolean) {
+    val subtitle = when {
+        awaitingLink -> "Vincule-se a um paciente para acompanhar os medicamentos."
+        readOnly -> "Medicamentos do paciente que você acompanha."
+        else -> "Seus medicamentos cadastrados e horários."
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "Medicamentos",
+            color = MedAlertTextPrimary,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = subtitle,
+            color = MedAlertTextSecondary,
+            fontSize = 14.sp
+        )
+    }
+}
+
+/** Aviso de erro com a lista ainda visível (dados salvos no celular). */
+@Composable
+private fun ErrorBanner(
+    message: String,
+    onRetryClick: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MedAlertCard, shape = RoundedCornerShape(14.dp))
+            .padding(14.dp)
+    ) {
+        Text(
+            text = message,
+            color = MedAlertStatusRed,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = onRetryClick) {
+                Text("Tentar de novo", color = MedAlertPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            }
+            TextButton(onClick = onDismiss) {
+                Text("Fechar", color = MedAlertTextSecondary, fontSize = 13.sp)
+            }
+        }
     }
 }
 
@@ -143,7 +291,8 @@ private fun MedicationCard(
                 }
             }
 
-            if (medication.active) {
+            // Para o cuidador o "ativo" é só o valor padrão (a API não informa), então não é exibido.
+            if (medication.active && !readOnly) {
                 Box(
                     modifier = Modifier
                         .background(MedAlertPrimary.copy(alpha = 0.15f), shape = RoundedCornerShape(12.dp))

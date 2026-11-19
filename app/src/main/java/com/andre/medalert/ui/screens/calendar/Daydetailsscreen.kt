@@ -109,7 +109,7 @@ fun DayDetailsScreen(
             if (doses.isEmpty()) {
                 EmptyState(
                     icon = Icons.Filled.Medication,
-                    title = "Nenhuma dose prevista neste dia.",
+                    title = "",
                     message = "As doses aparecem de acordo com o início, o fim e a frequência dos seus medicamentos."
                 )
             } else {

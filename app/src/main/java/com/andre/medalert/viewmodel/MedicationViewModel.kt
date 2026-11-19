@@ -8,6 +8,7 @@ import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.local.entity.MedicationEntity
 import com.andre.medalert.data.repository.MedicationRepository
 import com.andre.medalert.data.repository.StaleSessionException
+import com.andre.medalert.data.schedule.withServerHorarios
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,6 +16,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
@@ -32,10 +34,18 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
 
     // A tela observa SEMPRE o Room: quando o refresh grava na tabela, a lista atualiza sozinha.
     // Sem paciente (logout, cuidador sem vínculo) a lista fica vazia, nunca com dados do anterior.
+    //
+    // withServerHorarios(): só para EXIBIÇÃO. O GET do cuidador não traz a lista de horários
+    // (doseDiaria); quando ela está vazia, monta os horários a partir de horario_dose + frequencia
+    // pela regra do servidor. Nada disso é gravado no Room.
     @OptIn(ExperimentalCoroutinesApi::class)
     val medications: StateFlow<List<MedicationEntity>> = patientId
         .flatMapLatest { id ->
-            if (id == null) flowOf(emptyList()) else repository.observeMedications(id)
+            if (id == null) {
+                flowOf(emptyList())
+            } else {
+                repository.observeMedications(id).map { list -> list.map { it.withServerHorarios() } }
+            }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 

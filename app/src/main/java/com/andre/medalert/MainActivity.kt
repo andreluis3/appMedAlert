@@ -366,6 +366,9 @@ class MainActivity : ComponentActivity() {
                         val errorMessage by
                         medicationViewModel.error.collectAsState()
 
+                        val isRefreshing by
+                        medicationViewModel.isRefreshing.collectAsState()
+
                         val medications = remember(medicationEntities) {
                             medicationEntities.map {
                                 it.toMedication()
@@ -375,6 +378,15 @@ class MainActivity : ComponentActivity() {
                         MedicationsScreen(
                             medications = medications,
                             errorMessage = errorMessage,
+                            // Até o PatientContext chegar do DataStore a tela mostra "carregando"
+                            // (e não "nenhum medicamento").
+                            isLoading = patientContext == null || isRefreshing,
+                            onRetryClick = {
+                                medicationViewModel.refresh()
+                            },
+                            onDismissError = {
+                                medicationViewModel.clearError()
+                            },
                             onNavigate = navigateToTab,
                             onAddClick = {
                                 navController.navigate("cadastro_med")
@@ -386,9 +398,11 @@ class MainActivity : ComponentActivity() {
                             onDeleteConfirm = { medication ->
                                 medicationViewModel.deleteMedication(medication.localId)
                             },
-                            readOnly = !canManage,
+                            // Regra definitiva: o cuidador só acompanha (somente leitura).
+                            // A Etapa 2 move esta regra para AccessPolicy/PatientContext.
+                            readOnly = !canManage || isCaregiver,
                             canAdd = patientContext?.canAddMedications ?: false,
-                            managingForPatient = canManage && isCaregiver,
+                            managingForPatient = false,
                             awaitingLink = awaitingLink
                         )
                     }

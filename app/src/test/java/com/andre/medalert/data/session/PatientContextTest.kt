@@ -24,19 +24,24 @@ class PatientContextTest {
         assertEquals(9, c.patientId)
         assertNull(c.caregiverId)
         assertEquals("Maria", c.patientName)
+        assertTrue(c.canAddMedications)
         assertTrue(c.canManageMedications)
+        assertTrue(c.canRegisterDoses)
         assertFalse(c.isCaregiver)
     }
 
     @Test
-    fun cuidadorVinculado_donoEOPaciente_eONomeDoCuidadorNuncaViraNomeDoPaciente() {
+    fun cuidadorVinculado_donoEOPaciente_eSoVisualiza_eONomeDoCuidadorNuncaViraNomeDoPaciente() {
         val c = ctx("cuidador", 7, 9, ownName = "Carlos (cuidador)")
         assertEquals(LinkState.CAREGIVER_LINKED, c.linkState)
         assertEquals(7, c.userId)
         assertEquals(9, c.patientId)
         assertEquals(7, c.caregiverId)
         assertNull(c.patientName)
-        assertTrue(c.canManageMedications)
+        // Somente leitura: acompanha o paciente, mas não escreve nada.
+        assertFalse(c.canAddMedications)
+        assertFalse(c.canManageMedications)
+        assertFalse(c.canRegisterDoses)
         assertTrue(c.isCaregiver)
     }
 
@@ -57,7 +62,9 @@ class PatientContextTest {
             assertNull(c.patientId)
             assertNull(c.patientName)
             assertEquals(7, c.caregiverId)
+            assertFalse(c.canAddMedications)
             assertFalse(c.canManageMedications)
+            assertFalse(c.canRegisterDoses)
             assertTrue(c.isAwaitingLink)
         }
     }
@@ -75,7 +82,9 @@ class PatientContextTest {
             assertNull(c.patientId)
             assertNull(c.caregiverId)
             assertNull(c.patientName)
+            assertFalse(c.canAddMedications)
             assertFalse(c.canManageMedications)
+            assertFalse(c.canRegisterDoses)
         }
     }
 
@@ -92,18 +101,30 @@ class PatientContextTest {
     }
 
     @Test
-    fun canManageMedications_bateComAccessPolicy_emTodasAsCombinacoes() {
+    fun permissoes_batemComAccessPolicy_emTodasAsCombinacoes() {
         val tipos = listOf("paciente", "cuidador", " Cuidador ", "")
         val ids = listOf<Int?>(null, -1, 0, 7)
         for (tipo in tipos) for (user in ids) for (vinculo in ids) {
             val c = PatientContext.from(SessionInfo(user, tipo, vinculo), null, null)
+            val rotulo = "tipo=$tipo user=$user vinculo=$vinculo"
+
             assertEquals(
-                "tipo=$tipo user=$user vinculo=$vinculo",
+                "adicionar $rotulo",
+                AccessPolicy.canAddMedications(tipo, user, vinculo),
+                c.canAddMedications
+            )
+            assertEquals(
+                "gerenciar $rotulo",
                 AccessPolicy.canManageMedications(tipo, user, vinculo),
                 c.canManageMedications
             )
             assertEquals(
-                "dono tipo=$tipo user=$user vinculo=$vinculo",
+                "registrar dose $rotulo",
+                AccessPolicy.canRegisterDose(tipo, user, vinculo),
+                c.canRegisterDoses
+            )
+            assertEquals(
+                "dono $rotulo",
                 AccessPolicy.medicationOwnerIdFor(tipo, user, vinculo),
                 if (c.canManageMedications) c.patientId else null
             )

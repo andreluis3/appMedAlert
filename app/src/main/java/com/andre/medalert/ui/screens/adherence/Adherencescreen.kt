@@ -47,6 +47,7 @@ import com.andre.medalert.data.remote.dto.AdesaoDiaDto
 import com.andre.medalert.data.remote.dto.AdesaoRemedioDto
 import com.andre.medalert.data.remote.dto.DashboardResponse
 import com.andre.medalert.data.remote.dto.HorarioEsquecidoDto
+import com.andre.medalert.data.remote.dto.parsePercentOrNull
 import com.andre.medalert.state.AdherenceUiState
 import com.andre.medalert.ui.components.CaregiverAwaitingLinkState
 import com.andre.medalert.ui.components.EmptyState
@@ -64,7 +65,7 @@ import com.andre.medalert.ui.theme.MedAlertTextSecondary
 /**
  * Tela "Adesão ao tratamento".
  *
- * Alimentada por GET /api/historys/dashboard?id=userId (ver [DashboardResponse]).
+ * Alimentada por GET /api/historys/dashboard/{usuarioId} (ver [DashboardResponse]).
  * A tela não sabe de onde vêm os dados: recebe apenas o [uiState].
  */
 @Composable
@@ -644,27 +645,17 @@ private fun AdherenceProgressBar(
 }
 
 /**
- * Formata o percentual que veio da API apenas para exibição:
- * "23.6" -> "23,6%", "50.0" -> "50%", "22" -> "22%".
- * Não recalcula nada.
- */
-/**
- * Formata o percentual recebido da API para exibição.
+ * Formata o percentual recebido da API apenas para exibição (não recalcula nada).
  *
  * Exemplos:
  * "23.6" -> "23,6%"
  * "50.0" -> "50%"
  * "22"   -> "22%"
- * "null" -> "0%"
- * ""     -> "0%"
+ * "0.0"  -> "0%"   (zero verdadeiro)
+ * null, "", "null" ou texto ilegível -> "—" (dado ausente; NUNCA vira "0%")
  */
 private fun formatPercent(raw: String?): String {
-    val value = raw
-        ?.trim()
-        ?.removeSuffix("%")
-        ?.toFloatOrNull()
-        ?.takeIf { it.isFinite() }
-        ?: return "0%"
+    val value = parsePercentOrNull(raw) ?: return "—"
 
     val formatted = if (value % 1f == 0f) {
         value.toInt().toString()
@@ -675,24 +666,14 @@ private fun formatPercent(raw: String?): String {
     return "$formatted%"
 }
 
-
 /**
- * Converte o percentual da API em uma fração entre 0f e 1f.
- *
- * Valores inválidos ou nulos retornam 0f.
+ * Converte o percentual da API em uma fração entre 0f e 1f, só para desenhar barras e arcos.
+ * Dado ausente ou ilegível desenha vazio; o texto ao lado mostra "—" (ver [formatPercent]).
  */
 private fun percentToFraction(raw: String?): Float {
-    val value = raw
-        ?.trim()
-        ?.removeSuffix("%")
-        ?.toFloatOrNull()
-        ?.takeIf { it.isFinite() }
-        ?: return 0f
-
+    val value = parsePercentOrNull(raw) ?: return 0f
     return (value / 100f).coerceIn(0f, 1f)
 }
-
-
 
 private fun abbreviateWeekday(diaSem: String?): String {
     val normalized = diaSem

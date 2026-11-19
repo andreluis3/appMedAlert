@@ -67,6 +67,10 @@ private const val COMPACT_LIMIT = 4
  * O número de responsáveis depende de um endpoint de listagem que ainda não existe no backend.
  * As permissões de notificação/alarme exato são pedidas por um popup ao entrar no app.
  *
+ * Registrar dose: só o PACIENTE ([HomeUiState.canRegisterDoses]). Para o cuidador (somente
+ * leitura) nenhum botão "Registrar" aparece; o HomeViewModel e o DoseIntakeRegistrar também
+ * recusam o registro.
+ *
  * Estrutura: cabeçalho, (banner do cuidador), NextMedicationCard, resumo do dia, lista compacta
  * de próximas doses (com "Ver todas as doses de hoje") e os cards de estatística.
  */
@@ -132,7 +136,9 @@ fun HomeScreen(
             // Card principal: próxima dose com cronômetro.
             NextMedicationCard(
                 doses = state.dosesToday,
-                onRegister = { dose -> viewModel.registerDose(dose) }
+                onRegister = { dose -> viewModel.registerDose(dose) },
+                canRegister = state.canRegisterDoses,
+                caregiverView = state.isCaregiver
             )
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -141,7 +147,9 @@ fun HomeScreen(
                 TodaySummary(
                     taken = state.dosesToday.count { it.isTaken },
                     total = state.dosesToday.size,
-                    medications = state.medicationsToday
+                    medications = state.medicationsToday,
+                    // Cuidador: sem confirmação de tomada, "0 de N" daria a entender que nada foi tomado.
+                    showProgress = !state.isCaregiver
                 )
                 Spacer(modifier = Modifier.height(20.dp))
 
@@ -168,7 +176,11 @@ fun HomeScreen(
 
                 if (showAll) {
                     state.dosesToday.forEach { dose ->
-                        MedicationDoseRow(dose, onRegister = { viewModel.registerDose(dose) })
+                        MedicationDoseRow(
+                            dose = dose,
+                            canRegister = state.canRegisterDoses,
+                            onRegister = { viewModel.registerDose(dose) }
+                        )
                         Spacer(modifier = Modifier.height(10.dp))
                     }
                 } else if (visible.isEmpty()) {
@@ -180,7 +192,11 @@ fun HomeScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                 } else {
                     visible.forEach { dose ->
-                        CompactDoseRow(dose, onRegister = { viewModel.registerDose(dose) })
+                        CompactDoseRow(
+                            dose = dose,
+                            canRegister = state.canRegisterDoses,
+                            onRegister = { viewModel.registerDose(dose) }
+                        )
                         Spacer(modifier = Modifier.height(8.dp))
                     }
                 }
@@ -321,7 +337,7 @@ private fun LinkedPatientBanner(patientName: String?) {
 
 /** Resumo do dia: doses registradas / previstas, com barra de progresso discreta. */
 @Composable
-private fun TodaySummary(taken: Int, total: Int, medications: Int) {
+private fun TodaySummary(taken: Int, total: Int, medications: Int, showProgress: Boolean) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -347,38 +363,45 @@ private fun TodaySummary(taken: Int, total: Int, medications: Int) {
                     fontSize = 12.sp
                 )
             }
-            Text(
-                text = "$taken de $total",
-                color = MedAlertPrimary,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold
-            )
+            if (showProgress) {
+                Text(
+                    text = "$taken de $total",
+                    color = MedAlertPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        if (showProgress) {
+            Spacer(modifier = Modifier.height(12.dp))
 
-        val fraction = if (total > 0) taken.toFloat() / total else 0f
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(6.dp)
-                .background(MedAlertBackground, RoundedCornerShape(3.dp))
-        ) {
-            if (fraction > 0f) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(fraction)
-                        .height(6.dp)
-                        .background(MedAlertPrimary, RoundedCornerShape(3.dp))
-                )
+            val fraction = if (total > 0) taken.toFloat() / total else 0f
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .background(MedAlertBackground, RoundedCornerShape(3.dp))
+            ) {
+                if (fraction > 0f) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(fraction)
+                            .height(6.dp)
+                            .background(MedAlertPrimary, RoundedCornerShape(3.dp))
+                    )
+                }
             }
         }
     }
 }
 
-/** Linha compacta das próximas doses. Doses que já passaram mantêm o "Registrar". */
+/**
+ * Linha compacta das próximas doses. Doses que já passaram mostram o "Registrar", mas só para
+ * quem pode registrar ([canRegister]: o paciente).
+ */
 @Composable
-private fun CompactDoseRow(dose: HomeDoseUi, onRegister: () -> Unit) {
+private fun CompactDoseRow(dose: HomeDoseUi, canRegister: Boolean, onRegister: () -> Unit) {
     val details = listOf(dose.dosage, dose.quantity)
         .filter { it.isNotBlank() }
         .joinToString(" · ")
@@ -428,7 +451,7 @@ private fun CompactDoseRow(dose: HomeDoseUi, onRegister: () -> Unit) {
             fontWeight = FontWeight.Bold
         )
 
-        if (dose.isPast) {
+        if (dose.isPast && canRegister) {
             TextButton(onClick = onRegister) {
                 Text(
                     text = "Registrar",
@@ -443,7 +466,7 @@ private fun CompactDoseRow(dose: HomeDoseUi, onRegister: () -> Unit) {
 
 /** Linha completa (a original), usada em "Ver todas as doses de hoje". */
 @Composable
-private fun MedicationDoseRow(dose: HomeDoseUi, onRegister: () -> Unit) {
+private fun MedicationDoseRow(dose: HomeDoseUi, canRegister: Boolean, onRegister: () -> Unit) {
     val iconColor = when {
         dose.isTaken -> MedAlertStatusGreen
         dose.isPast -> MedAlertTextSecondary
@@ -509,8 +532,8 @@ private fun MedicationDoseRow(dose: HomeDoseUi, onRegister: () -> Unit) {
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold
                 )
-            } else if (dose.isPast) {
-                // Paciente ou cuidador registram a administração de uma dose já no horário.
+            } else if (dose.isPast && canRegister) {
+                // Só o paciente registra a administração de uma dose já no horário.
                 TextButton(onClick = onRegister) {
                     Text(
                         text = "Registrar",

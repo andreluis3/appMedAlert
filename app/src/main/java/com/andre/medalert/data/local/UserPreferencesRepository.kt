@@ -10,6 +10,8 @@ import androidx.datastore.preferences.preferencesDataStore
 import androidx.datastore.preferences.core.MutablePreferences
 import com.andre.medalert.data.model.PendingInvite
 import com.andre.medalert.data.model.PendingInviteCodec
+import com.andre.medalert.data.model.SentInvite
+import com.andre.medalert.data.model.SentInviteCodec
 import com.andre.medalert.data.session.AccessPolicy
 import com.andre.medalert.data.session.LinkedPatientProfile
 import com.andre.medalert.data.session.SessionInfo
@@ -230,6 +232,45 @@ class UserPreferencesRepository(context: Context) {
     }
 
     // ---------------------------------------------------------------------------
+    // Convites ENVIADOS pelo paciente (só neste aparelho)
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Chave por paciente: dois pacientes no mesmo aparelho nunca veem os convites um do outro.
+     * Não faz parte da sessão e NÃO é apagada no logout (a API não permite recuperar essa lista).
+     */
+    private fun sentInvitesKey(patientId: Int) = stringPreferencesKey("sent_invites_$patientId")
+
+    /** Convites que o paciente [patientId] enviou a partir deste aparelho (mais recente primeiro). */
+    fun sentInvites(patientId: Int): Flow<List<SentInvite>> =
+        dataStore.data.map { SentInviteCodec.decode(it[sentInvitesKey(patientId)]) }
+
+    /** Registra um convite enviado. O mesmo e-mail substitui o registro anterior. */
+    suspend fun addSentInvite(patientId: Int, invite: SentInvite) {
+        if (patientId <= 0) return
+        dataStore.edit { prefs ->
+            val key = sentInvitesKey(patientId)
+            prefs[key] = SentInviteCodec.encode(
+                SentInviteCodec.add(SentInviteCodec.decode(prefs[key]), invite)
+            )
+        }
+    }
+
+    /** Apaga só o registro local do convite para [email]. Não desfaz vínculo nenhum. */
+    suspend fun removeSentInvite(patientId: Int, email: String) {
+        if (patientId <= 0) return
+        dataStore.edit { prefs ->
+            val key = sentInvitesKey(patientId)
+            val remaining = SentInviteCodec.remove(SentInviteCodec.decode(prefs[key]), email)
+            if (remaining.isEmpty()) {
+                prefs.remove(key)
+            } else {
+                prefs[key] = SentInviteCodec.encode(remaining)
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------------
     // Dono dos dados em cache no Room
     // ---------------------------------------------------------------------------
 
@@ -254,12 +295,8 @@ class UserPreferencesRepository(context: Context) {
     /**
      * Encerra a sessão: remove id, token, tipo, paciente vinculado, nome, e-mail, marcador do FCM,
      * convites pendentes e o nome do paciente acompanhado. NÃO apaga preferências gerais do app
-     * nem o marcador [localDataOwner] (a limpeza do Room usa esse marcador depois).
-     */
-    /**
-     * Encerra a sessão: remove id, token, tipo, paciente vinculado, nome, e-mail, marcador do FCM,
-     * convites pendentes e o nome do paciente acompanhado. NÃO apaga preferências gerais do app
-     * nem o marcador [localDataOwner] (a limpeza do Room usa esse marcador depois).
+     * nem o marcador [localDataOwner] (a limpeza do Room usa esse marcador depois) nem os
+     * convites enviados pelo paciente ([sentInvites]).
      */
     suspend fun clearSession() {
         dataStore.edit { prefs -> removeSessionKeys(prefs) }
