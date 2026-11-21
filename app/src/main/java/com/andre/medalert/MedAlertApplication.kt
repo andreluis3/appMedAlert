@@ -6,6 +6,8 @@ import com.andre.medalert.data.schedule.SessionMedications
 import com.andre.medalert.data.session.SessionLifecycle
 import com.andre.medalert.notification.MedicationReminderManager
 import com.andre.medalert.notification.NotificationHelper
+import com.andre.medalert.notification.NotificationRecorder
+import com.andre.medalert.sync.OverdueDoseWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -16,6 +18,10 @@ import kotlinx.coroutines.launch
  * cadastro, edição, exclusão, refresh da API, logout e sessão expirada passam todos por aqui.
  * Sessão de cuidador não mexe nos alarmes (ver SessionMedications.observeForAlarms).
  * Também liga o token da sessão ao Retrofit e inicia o ciclo de sincronização (SessionLifecycle).
+ *
+ * Caixa de notificações: o [NotificationRecorder] recebe o Context aqui para que camadas sem
+ * Context (MedicationRepository) possam gravar acontecimentos, e a verificação periódica de doses
+ * atrasadas é agendada (ela confere a sessão a cada execução; sem sessão não faz nada).
  */
 class MedAlertApplication : Application() {
 
@@ -27,6 +33,11 @@ class MedAlertApplication : Application() {
         // o "Authorization: Bearer".
         SessionManager.init(this)
         NotificationHelper.createNotificationChannel(this)
+        NotificationRecorder.init(this)
+
+        // Doses atrasadas / não registradas viram notificações na caixa (só paciente; ver o worker).
+        OverdueDoseWorker.schedulePeriodic(this)
+        OverdueDoseWorker.runOnce(this)
 
         // Login, logout, 401 e aceite de vínculo: sincronização, token FCM e limpeza de cache.
         appScope.launch {

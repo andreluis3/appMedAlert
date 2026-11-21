@@ -1,30 +1,47 @@
 package com.andre.medalert.data.model
 
 /**
- * Categorias de notificação. Não existe endpoint de notificações na API
- * ainda, então esses valores são só do frontend por enquanto.
+ * Categorias de notificação da caixa de entrada.
+ *
+ * O Room guarda o NOME do valor (texto). Um valor que este app não conhece (por exemplo, criado
+ * por uma versão mais nova) é lido como [SYSTEM], então o app nunca quebra por causa de um tipo novo.
  */
 enum class NotificationType {
     MEDICATION_REMINDER,
     MEDICATION_MISSED,
     MEDICATION_DELAYED,
+    DOSE_TAKEN,
+    NEW_MEDICATION,
+    MEDICATION_EDITED,
+    MEDICATION_REMOVED,
     RESPONSIBLE_ADDED,
     RESPONSIBLE_ACCEPTED,
-    NEW_MEDICATION,
     ADHERENCE_SUMMARY,
-    SYSTEM
+    SYSTEM;
+
+    companion object {
+        fun fromStored(raw: String?): NotificationType =
+            entries.firstOrNull { it.name == raw } ?: SYSTEM
+    }
 }
 
-// TODO: substituir quando existir contrato da API de notificações.
+/**
+ * Notificação como a tela a exibe.
+ *
+ * - [horario]: "HH:mm" para hoje, "dd/MM HH:mm" para dias anteriores.
+ * - [criadaEm]: epoch millis (a tela usa para agrupar em Hoje / Ontem / Anteriores).
+ * - [acoesDisponiveis]: true só quando "Já tomei" / "Lembrar depois" podem agir de verdade:
+ *   o usuário pode registrar dose, a dose é a mais recente do medicamento, está dentro da janela
+ *   de ação e ainda não foi registrada.
+ */
 data class NotificationUiModel(
-    val id: Int,
+    val id: Long,
     val titulo: String,
     val descricao: String,
-    val horario: String, // texto livre por enquanto: "Hoje - 14:30", "Ontem"
+    val horario: String,
+    val criadaEm: Long,
     val tipo: NotificationType,
     val lida: Boolean,
-    // Preenchidos só quando a notificação é sobre um medicamento específico,
-    // pra habilitar as ações de "marcar como tomado" / "lembrar mais tarde".
     val medicationName: String? = null,
-    val scheduledTime: String? = null
+    val acoesDisponiveis: Boolean = false
 )

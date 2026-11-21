@@ -3,9 +3,11 @@ package com.andre.medalert.fcm
 import android.content.Context
 import com.andre.medalert.data.local.AppDatabase
 import com.andre.medalert.data.local.UserPreferencesRepository
+import com.andre.medalert.data.model.NotificationType
 import com.andre.medalert.data.schedule.DoseReconciler
 import com.andre.medalert.data.session.AccessPolicy
 import com.andre.medalert.notification.NotificationHelper
+import com.andre.medalert.notification.NotificationRecorder
 import com.andre.medalert.sync.MedicationSyncWorker
 import com.andre.medalert.util.AppLog
 import kotlinx.coroutines.CancellationException
@@ -18,7 +20,8 @@ import java.time.ZoneId
 /**
  * Trata mensagens FCM como SINALIZAÇÃO, nunca como fonte de dados:
  * 1. toda mensagem recebida com sessão ativa dispara uma sincronização (API + Room);
- * 2. depois mostra um aviso local descrevendo o evento.
+ * 2. depois mostra um aviso local descrevendo o evento;
+ * 3. os eventos conhecidos também são gravados na CAIXA DE NOTIFICAÇÕES do usuário (Room).
  * Os dados que a tela exibe continuam vindo do Room, alimentado pela API.
  *
  * FORMATO ESPERADO DA MENSAGEM (contrato PROPOSTO; o backend ainda não envia estes eventos —
@@ -31,7 +34,12 @@ import java.time.ZoneId
  * Convite de cuidador (/api/users/requestCuidador): a mensagem traz `notification` (título/texto)
  * e `data = { pacientId }`. Com o app ABERTO este handler persiste o convite via [InviteIntake];
  * com o app em segundo plano/fechado quem mostra a notificação é o sistema e o `pacientId` chega
- * pelos extras do Intent na MainActivity (ver InviteIntake).
+ * pelos extras do Intent na MainActivity (ver InviteIntake). O convite entra na caixa pelo
+ * próprio InviteIntake, não por aqui.
+ *
+ * Caixa de notificações: o evento é gravado para o PACIENTE VINCULADO da sessão (a mensagem não
+ * traz o id do paciente). O gravador recusa se não houver vínculo. A chave de deduplicação usa o
+ * horário previsto, ou o messageId do FCM, então a reentrega da mesma mensagem não duplica.
  */
 object RemoteEventHandler {
 
@@ -73,11 +81,26 @@ object RemoteEventHandler {
         }
     }
 
+    /** Tipo da caixa de notificações correspondente a cada evento remoto. */
+    private fun EventType.toNotificationType(): NotificationType = when (this) {
+        EventType.DOSE_REGISTRADA -> NotificationType.DOSE_TAKEN
+        EventType.MEDICAMENTO_ALTERADO -> NotificationType.MEDICATION_EDITED
+        EventType.MEDICAMENTO_EXCLUIDO -> NotificationType.MEDICATION_REMOVED
+        EventType.DOSE_ATRASADA -> NotificationType.MEDICATION_DELAYED
+        EventType.DOSE_SEM_CONFIRMACAO -> NotificationType.MEDICATION_MISSED
+    }
+
     /**
      * Chamado pelo [MedAlertMessagingService]. Roda na thread de background do FCM, então
      * bloquear brevemente (Room/DataStore) é seguro.
      */
-    fun handle(context: Context, data: Map<String, String>, notifTitle: String?, notifBody: String?) {
+    fun handle(
+        context: Context,
+        data: Map<String, String>,
+        notifTitle: String?,
+        notifBody: String?,
+        messageId: String? = null
+    ) {
         val app = context.applicationContext
         try {
             runBlocking(Dispatchers.IO) {
@@ -119,6 +142,33 @@ object RemoteEventHandler {
                     if (already) {
                         AppLog.d(TAG, "Alerta descartado: a dose já consta como registrada")
                         return@runBlocking
+                    }
+                }
+
+                // 3) Caixa de notificações: só eventos conhecidos, e só do paciente vinculado à sessão
+                // (o gravador também confere). O convite já foi gravado pelo InviteIntake.
+                if (type != null) {
+                    val patientId = AccessPolicy.patientIdFor(
+                        session.tipo, session.userId, session.pacienteId
+                    )
+                    if (patientId != null) {
+                        NotificationRecorder.record(
+                            context = app,
+                            tipo = type.toNotificationType(),
+                            titulo = title,
+                            descricao = text,
+                            dedupeKey = NotificationRecorder.remoteEventKey(
+                                patientId = patientId,
+                                wire = type.wire,
+                                medicationRemoteId = medicationRemoteId,
+                                previstoEm = scheduledAt,
+                                messageId = messageId
+                            ),
+                            patientId = patientId,
+                            medicationRemoteId = medicationRemoteId,
+                            previstoEm = scheduledAt,
+                            origem = NotificationRecorder.ORIGEM_FCM
+                        )
                     }
                 }
 

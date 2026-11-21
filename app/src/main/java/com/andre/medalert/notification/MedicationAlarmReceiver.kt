@@ -3,9 +3,13 @@ package com.andre.medalert.notification
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import com.andre.medalert.data.model.NotificationType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MedicationAlarmReceiver : BroadcastReceiver() {
 
@@ -51,7 +55,14 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
         }
     }
 
-    /** Os dados vêm do Room (fonte de verdade), não dos extras do alarme. */
+    /**
+     * Os dados vêm do Room (fonte de verdade), não dos extras do alarme.
+     *
+     * Além do aviso do sistema, o lembrete é gravado na caixa de notificações. A chave de
+     * deduplicação usa o horário ORIGINAL da dose, então o adiamento ("Adiar 5 min") reapresenta
+     * o aviso do sistema mas NÃO cria uma segunda linha na caixa. O gravador não lança exceção:
+     * se falhar, o aviso e o reagendamento seguem normalmente.
+     */
     private suspend fun showFromRoom(app: Context, localId: Long, scheduledAt: Long) {
         val med = MedicationReminderManager.findDeliverable(app, localId) ?: return
         NotificationHelper.showMedicationNotification(
@@ -61,5 +72,23 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
             dosage = med.dosagem,
             scheduledAtMillis = scheduledAt
         )
+
+        val doseLine = if (med.dosagem.isBlank()) med.nome else "${med.nome} — ${med.dosagem}"
+        NotificationRecorder.record(
+            context = app,
+            tipo = NotificationType.MEDICATION_REMINDER,
+            titulo = "Hora do medicamento",
+            descricao = "$doseLine, programado para ${formatHour(scheduledAt)}.",
+            dedupeKey = NotificationRecorder.reminderKey(med.userId, med.id, scheduledAt),
+            patientId = med.userId,
+            medicationLocalId = med.id,
+            medicationRemoteId = med.remoteId,
+            medicationNome = med.nome,
+            previstoEm = scheduledAt,
+            criadaEm = scheduledAt
+        )
     }
+
+    private fun formatHour(millis: Long): String =
+        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(millis))
 }

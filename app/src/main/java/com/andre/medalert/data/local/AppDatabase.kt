@@ -8,15 +8,18 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.andre.medalert.data.local.dao.DoseHistoryDao
 import com.andre.medalert.data.local.dao.MedicationDao
+import com.andre.medalert.data.local.dao.NotificationDao
 import com.andre.medalert.data.local.entity.DoseHistoryEntity
 import com.andre.medalert.data.local.entity.MedicationEntity
+import com.andre.medalert.data.local.entity.NotificationEntity
 
 @Database(
     entities = [
         MedicationEntity::class,
-        DoseHistoryEntity::class
+        DoseHistoryEntity::class,
+        NotificationEntity::class
     ],
-    version = 9,
+    version = 10,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -24,6 +27,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun medicationDao(): MedicationDao
 
     abstract fun doseHistoryDao(): DoseHistoryDao
+
+    abstract fun notificationDao(): NotificationDao
 
     companion object {
 
@@ -312,6 +317,49 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 9 -> 10: cria a caixa de notificações (tabela `notifications` e seus índices).
+         *
+         * Só CREATE TABLE / CREATE INDEX: NÃO toca em `medications` nem em `dose_history`, então
+         * nenhum medicamento, dose, adesão ou vínculo é lido, copiado ou alterado. A tabela nasce
+         * vazia; as notificações passam a existir a partir dos acontecimentos novos.
+         * O esquema abaixo precisa ser idêntico ao que o Room espera para NotificationEntity.
+         */
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `notifications` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `recipientUserId` INTEGER NOT NULL,
+                        `patientId` INTEGER NOT NULL,
+                        `tipo` TEXT NOT NULL,
+                        `titulo` TEXT NOT NULL,
+                        `descricao` TEXT NOT NULL,
+                        `criadaEm` INTEGER NOT NULL,
+                        `lidaEm` INTEGER,
+                        `dedupeKey` TEXT NOT NULL,
+                        `medicationLocalId` INTEGER,
+                        `medicationRemoteId` INTEGER,
+                        `medicationNome` TEXT,
+                        `previstoEm` INTEGER,
+                        `origem` TEXT NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS " +
+                            "`index_notifications_recipientUserId_dedupeKey` " +
+                            "ON `notifications` (`recipientUserId`, `dedupeKey`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS " +
+                            "`index_notifications_recipientUserId_criadaEm` " +
+                            "ON `notifications` (`recipientUserId`, `criadaEm`)"
+                )
+            }
+        }
+
 
         /** Todas as migrations, na ordem. Usada pelo app e pelos testes de migração. */
         val ALL_MIGRATIONS: Array<Migration> = arrayOf(
@@ -321,7 +369,8 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_5_6,
             MIGRATION_6_7,
             MIGRATION_7_8,
-            MIGRATION_8_9
+            MIGRATION_8_9,
+            MIGRATION_9_10
         )
 
         fun getInstance(context: Context): AppDatabase =

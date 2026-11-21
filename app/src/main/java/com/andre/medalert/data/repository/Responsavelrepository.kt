@@ -1,12 +1,14 @@
 package com.andre.medalert.data.repository
 
 import com.andre.medalert.data.local.UserPreferencesRepository
+import com.andre.medalert.data.model.NotificationType
 import com.andre.medalert.data.model.ResponsavelUiModel
 import com.andre.medalert.data.model.SentInvite
 import com.andre.medalert.data.remote.ApiService
 import com.andre.medalert.data.remote.RetrofitClient
 import com.andre.medalert.data.remote.dto.RequestCuidadorRequest
 import com.andre.medalert.data.session.AccessPolicy
+import com.andre.medalert.notification.NotificationRecorder
 import kotlinx.coroutines.flow.first
 import java.time.Instant
 import java.time.ZoneId
@@ -63,6 +65,9 @@ private fun SentInvite.toUiModel(): ResponsavelUiModel {
  * apresentado como vínculo ativo. Trocar de aparelho ou reinstalar o app perde esse registro.
  *
  * Remover: apaga só o registro local do convite. NÃO desfaz um vínculo já aceito (não há rota).
+ *
+ * Caixa de notificações: depois que a API confirma o envio do convite, é gravado um aviso na caixa
+ * do paciente ("Convite enviado"). Nada é gravado se o envio falhar.
  */
 class ResponsavelRepositoryApi(
     private val prefs: UserPreferencesRepository,
@@ -96,6 +101,18 @@ class ResponsavelRepositoryApi(
             sentAtMillis = System.currentTimeMillis()
         )
         prefs.addSentInvite(patientId, invite)
+
+        // Melhor esforço: o gravador nunca lança exceção e não impede o convite de ser concluído.
+        NotificationRecorder.record(
+            context = null,
+            tipo = NotificationType.RESPONSIBLE_ADDED,
+            titulo = "Convite enviado",
+            descricao = "Você convidou ${invite.nome.ifBlank { invite.email }} " +
+                    "(${invite.email}) para acompanhar seus medicamentos.",
+            dedupeKey = NotificationRecorder.inviteSentKey(patientId, invite.email, invite.sentAtMillis),
+            patientId = patientId,
+            criadaEm = invite.sentAtMillis
+        )
         return invite.toUiModel()
     }
 

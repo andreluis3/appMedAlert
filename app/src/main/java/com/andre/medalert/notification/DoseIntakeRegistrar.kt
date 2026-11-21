@@ -3,6 +3,7 @@ package com.andre.medalert.notification
 import android.content.Context
 import com.andre.medalert.data.local.AppDatabase
 import com.andre.medalert.data.local.UserPreferencesRepository
+import com.andre.medalert.data.model.NotificationType
 import com.andre.medalert.data.repository.HistoryRepository
 import com.andre.medalert.data.session.AccessPolicy
 import com.andre.medalert.sync.HistorySyncWorker
@@ -10,6 +11,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 enum class DoseRegisterResult {
     /** Registro criado no Room. */
@@ -36,6 +40,10 @@ enum class DoseRegisterResult {
  * O registro nasce com isSynced = false e, logo depois de gravado, é agendado o envio ao
  * POST /api/historys ([HistorySyncWorker]). Sem internet o registro continua no Room e é
  * enviado quando a conexão voltar.
+ *
+ * Caixa de notificações: quando a dose é REALMENTE registrada agora, também é gravada a
+ * notificação "Dose registrada" ([NotificationRecorder]). Isso nunca altera nem atrasa o registro
+ * da dose: o gravador não lança exceção e a repetição não duplica (chave de deduplicação).
  */
 object DoseIntakeRegistrar {
 
@@ -90,6 +98,27 @@ object DoseIntakeRegistrar {
                 // O envio será tentado de novo ao abrir o app.
             }
 
+            // Caixa de notificações (melhor esforço; o gravador nunca lança exceção).
+            val doseLine = if (med.dosagem.isBlank()) med.nome else "${med.nome} (${med.dosagem})"
+            NotificationRecorder.record(
+                context = app,
+                tipo = NotificationType.DOSE_TAKEN,
+                titulo = "Dose registrada",
+                descricao = "$doseLine das ${formatHour(scheduledAtMillis)} foi marcada como tomada.",
+                dedupeKey = NotificationRecorder.doseTakenKey(
+                    patientId = med.userId,
+                    medicationRemoteId = med.remoteId,
+                    medicationLocalId = med.id,
+                    previstoEm = scheduledAtMillis
+                ),
+                patientId = med.userId,
+                medicationLocalId = med.id,
+                medicationRemoteId = med.remoteId,
+                medicationNome = med.nome,
+                previstoEm = scheduledAtMillis,
+                criadaEm = takenAtMillis
+            )
+
             DoseRegisterResult.REGISTERED
         } catch (e: CancellationException) {
             throw e
@@ -114,4 +143,7 @@ object DoseIntakeRegistrar {
             false
         }
     }
+
+    private fun formatHour(millis: Long): String =
+        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(millis))
 }

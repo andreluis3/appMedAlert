@@ -2,8 +2,10 @@ package com.andre.medalert.fcm
 
 import android.content.Context
 import com.andre.medalert.data.local.UserPreferencesRepository
+import com.andre.medalert.data.model.NotificationType
 import com.andre.medalert.data.model.PendingInviteCodec
 import com.andre.medalert.data.session.AccessPolicy
+import com.andre.medalert.notification.NotificationRecorder
 import com.andre.medalert.util.AppLog
 import kotlinx.coroutines.flow.first
 
@@ -15,6 +17,10 @@ import kotlinx.coroutines.flow.first
  *
  * Só PERSISTE o convite (DataStore). Não aceita nada e não chama /users/accept.
  * Nunca registra tokens: o log só mostra o ID do paciente (não é segredo) e flags.
+ *
+ * Caixa de notificações: quando o convite é NOVO (não estava guardado), também é gravado um aviso
+ * na caixa do cuidador. Como todos os caminhos passam por aqui, o convite aparece na caixa com o
+ * app aberto, em segundo plano ou fechado, e a repetição do mesmo convite não duplica o aviso.
  */
 object InviteIntake {
 
@@ -45,11 +51,29 @@ object InviteIntake {
             return null
         }
 
-        val novo = prefs.addPendingInvite(pacienteId, System.currentTimeMillis())
+        val receivedAt = System.currentTimeMillis()
+        val novo = prefs.addPendingInvite(pacienteId, receivedAt)
         AppLog.d(
             TAG,
             "Convite do paciente id=$pacienteId " + if (novo) "armazenado" else "já estava armazenado"
         )
+
+        if (novo) {
+            // O convite vem de um paciente ao qual o cuidador ainda NÃO está vinculado: é a única
+            // situação em que o gravador aceita um paciente fora do vínculo (allowUnlinkedPatient).
+            NotificationRecorder.record(
+                context = context,
+                tipo = NotificationType.RESPONSIBLE_ADDED,
+                titulo = "Convite de acompanhamento",
+                descricao = "Um paciente convidou você para ser o cuidador dele. " +
+                        "Abra o convite para aceitar ou recusar.",
+                dedupeKey = NotificationRecorder.inviteReceivedKey(pacienteId, receivedAt),
+                patientId = pacienteId,
+                origem = NotificationRecorder.ORIGEM_FCM,
+                criadaEm = receivedAt,
+                allowUnlinkedPatient = true
+            )
+        }
         return pacienteId
     }
 }

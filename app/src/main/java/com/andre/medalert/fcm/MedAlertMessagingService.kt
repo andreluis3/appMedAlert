@@ -10,7 +10,8 @@ import com.google.firebase.messaging.RemoteMessage
  *
  * Observação para o backend: só mensagens de dados (sem o bloco "notification") chegam aqui com
  * o app em segundo plano ou fechado. Com "notification", o sistema mostra o aviso sozinho e este
- * serviço não é chamado, então a sincronização não dispara.
+ * serviço não é chamado, então a sincronização não dispara (e o evento não entra na caixa de
+ * notificações do app).
  */
 class MedAlertMessagingService : FirebaseMessagingService() {
 
@@ -26,7 +27,9 @@ class MedAlertMessagingService : FirebaseMessagingService() {
             context = applicationContext,
             data = message.data,
             notifTitle = message.notification?.title,
-            notifBody = message.notification?.body
+            notifBody = message.notification?.body,
+            // A reentrega da mesma mensagem tem o mesmo messageId: não duplica na caixa.
+            messageId = message.messageId
         )
     }
 }

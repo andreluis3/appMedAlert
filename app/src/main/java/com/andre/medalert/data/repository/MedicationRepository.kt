@@ -7,6 +7,7 @@ import com.andre.medalert.data.mapper.HorarioDose
 import com.andre.medalert.data.mapper.toEntity
 import com.andre.medalert.data.mapper.toMedicamentoDataOrNull
 import com.andre.medalert.data.mapper.withIsoDates
+import com.andre.medalert.data.model.NotificationType
 import com.andre.medalert.data.remote.ApiService
 import com.andre.medalert.data.remote.RetrofitClient
 import com.andre.medalert.data.remote.dto.EditMedicamentoRequest
@@ -14,6 +15,7 @@ import com.andre.medalert.data.remote.dto.MedicamentoData
 import com.andre.medalert.data.remote.dto.MedicamentoResponse
 import com.andre.medalert.data.session.AccessPolicy
 import com.andre.medalert.data.session.SessionInfo
+import com.andre.medalert.notification.NotificationRecorder
 import com.andre.medalert.util.AppLog
 import com.google.gson.Gson
 import com.google.gson.JsonParser
@@ -111,6 +113,10 @@ enum class SaveOutcome {
  *
  * Autenticação: o token JWT é anexado pelo interceptor do RetrofitClient. Um 401 numa rota
  * protegida já limpa a sessão e leva o usuário ao login; aqui só traduzimos a mensagem.
+ *
+ * Caixa de notificações: depois que cadastro, edição ou exclusão são confirmados, o acontecimento
+ * é gravado via [NotificationRecorder] (melhor esforço: o gravador nunca lança exceção e nunca
+ * altera o resultado da operação). Os registros são deduplicados por chave.
  */
 class MedicationRepository(
     private val dao: MedicationDao,
@@ -365,6 +371,82 @@ class MedicationRepository(
             }
         }
 
+    // ---------------------------------------------------------------------------
+    // Caixa de notificações (melhor esforço; nunca altera o resultado da operação)
+    // ---------------------------------------------------------------------------
+
+    private fun doseLine(entity: MedicationEntity): String =
+        if (entity.dosagem.isBlank()) entity.nome else "${entity.nome} (${entity.dosagem})"
+
+    /**
+     * "Medicamento cadastrado". A chave usa o ID LOCAL (estável), então o reenvio de um pendente
+     * idêntico e a sincronização posterior não geram um segundo aviso.
+     */
+    private suspend fun recordMedicationCreated(localId: Long) {
+        val med = dao.getById(localId) ?: return
+        NotificationRecorder.record(
+            context = null,
+            tipo = NotificationType.NEW_MEDICATION,
+            titulo = "Medicamento cadastrado",
+            descricao = "${doseLine(med)} foi cadastrado.",
+            dedupeKey = NotificationRecorder.medicationCreatedKey(med.userId, med.id),
+            patientId = med.userId,
+            medicationLocalId = med.id,
+            medicationRemoteId = med.remoteId,
+            medicationNome = med.nome
+        )
+    }
+
+    /** "Medicamento atualizado". Chamado só depois que a API confirmou e o Room recebeu a edição. */
+    private suspend fun recordMedicationEdited(
+        localId: Long,
+        patientId: Int,
+        changes: Map<String, Any?>
+    ) {
+        val med = dao.getById(localId) ?: return
+        NotificationRecorder.record(
+            context = null,
+            tipo = NotificationType.MEDICATION_EDITED,
+            titulo = "Medicamento atualizado",
+            descricao = "${doseLine(med)} foi atualizado.",
+            dedupeKey = NotificationRecorder.medicationEditedKey(
+                patientId = patientId,
+                medicationRemoteId = med.remoteId,
+                medicationLocalId = med.id,
+                changesHash = changes.toSortedMap().toString().hashCode(),
+                minuteBucket = System.currentTimeMillis() / 60_000L
+            ),
+            patientId = patientId,
+            medicationLocalId = med.id,
+            medicationRemoteId = med.remoteId,
+            medicationNome = med.nome
+        )
+    }
+
+    /** "Medicamento removido". [entity] é a linha lida ANTES da exclusão. */
+    private suspend fun recordMedicationRemoved(entity: MedicationEntity) {
+        NotificationRecorder.record(
+            context = null,
+            tipo = NotificationType.MEDICATION_REMOVED,
+            titulo = "Medicamento removido",
+            descricao = "${doseLine(entity)} foi removido. O histórico de doses foi preservado.",
+            dedupeKey = NotificationRecorder.medicationRemovedKey(
+                entity.userId, entity.remoteId, entity.id
+            ),
+            patientId = entity.userId,
+            medicationNome = entity.nome
+        )
+    }
+
+    /**
+     * Exclui localmente preservando o histórico (mesma operação de antes) e, só se a linha foi
+     * mesmo removida, grava o aviso.
+     */
+    private suspend fun deleteLocalAndNotify(entity: MedicationEntity, patientId: Int) {
+        val removed = commitLocal { dao.deleteKeepingHistoryForUser(entity.id, patientId) }
+        if (removed) recordMedicationRemoved(entity)
+    }
+
     /**
      * POST /api/meds (CadastroMedScreen). SÓ O PACIENTE cadastra: o cuidador (mesmo vinculado)
      * recebe [CaregiverCannotAddException] antes de qualquer gravação.
@@ -381,6 +463,10 @@ class MedicationRepository(
      * - sem internet: devolve SAVED_OFFLINE (sucesso; será reenviado depois);
      * - 401: mensagem de sessão expirada;
      * - outros erros HTTP / inesperados: devolve erro, mas o registro continua no Room.
+     *
+     * A notificação "Medicamento cadastrado" é gravada nos dois desfechos de sucesso (SYNCED e
+     * SAVED_OFFLINE). Se o servidor recusar ou falhar, nada é avisado agora: o aviso sai quando o
+     * [syncPending] finalmente enviar o medicamento.
      */
     suspend fun saveMedicationForCurrentUser(draft: MedicamentoData): Result<SaveOutcome> {
         val access = writeAccess(Acao.CADASTRAR).getOrElse { return Result.failure(it) }
@@ -399,6 +485,7 @@ class MedicationRepository(
 
         return when (val envio = envioMutex.withLock { enviarPendente(localId) }) {
             is Envio.Enviado -> {
+                recordMedicationCreated(localId)
                 // Traz da API os dados reais (horários etc.); se falhar, o registro já está salvo.
                 refresh(patientId)
                 Result.success(SaveOutcome.SYNCED)
@@ -406,6 +493,7 @@ class MedicationRepository(
 
             is Envio.SemConexao -> {
                 AppLog.w(TAG, "Sem conexão ao salvar medicamento; ficou pendente (id local=$localId)")
+                recordMedicationCreated(localId)
                 Result.success(SaveOutcome.SAVED_OFFLINE)
             }
 
@@ -448,7 +536,7 @@ class MedicationRepository(
      * Fluxo: 1) a API confirma; 2) o Room recebe as mesmas mudanças (id local e remoteId
      * preservados) sob [commitLocal], então a lista já reflete a edição mesmo que o passo 3 falhe e
      * um refresh que estava em andamento não a desfaz; 3) refresh traz da API o que só ela calcula
-     * (ex.: horários). Em caso de erro da API, o Room NÃO muda.
+     * (ex.: horários). Em caso de erro da API, o Room NÃO muda (e nada é avisado).
      */
     suspend fun editMedication(localId: Long, changes: Map<String, Any?>): Result<Unit> {
         val access = writeAccess(Acao.EDITAR).getOrElse { return Result.failure(it) }
@@ -474,6 +562,8 @@ class MedicationRepository(
                 }
             }
 
+            recordMedicationEdited(localId, access.patientId, safeChanges)
+
             refresh(entity.userId) // se falhar, o Room já tem a edição; horários atualizam no próximo refresh
             Result.success(Unit)
         } catch (e: CancellationException) {
@@ -491,6 +581,7 @@ class MedicationRepository(
      * marcadas como "medicamento excluído" (deleteKeepingHistoryForUser).
      * Se o medicamento nunca foi enviado (criado offline), remove só localmente.
      * 404 = já não existe no servidor: remove local também.
+     * Em todos os casos de remoção efetiva, o aviso "Medicamento removido" é gravado.
      */
     suspend fun deleteMedication(localId: Long): Result<Unit> {
         val access = writeAccess(Acao.EXCLUIR).getOrElse { return Result.failure(it) }
@@ -502,20 +593,20 @@ class MedicationRepository(
 
         if (remoteId == null) {
             if (entity.isSynced) return Result.failure(Exception(semRemoteIdMessage(entity)))
-            commitLocal { dao.deleteKeepingHistoryForUser(localId, access.patientId) }
+            deleteLocalAndNotify(entity, access.patientId)
             return Result.success(Unit)
         }
 
         return try {
             api.deleteMedicamento(remoteId).close()
-            commitLocal { dao.deleteKeepingHistoryForUser(localId, access.patientId) }
+            deleteLocalAndNotify(entity, access.patientId)
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: HttpException) {
             if (e.code() == 404) {
                 AppLog.w(TAG, "DELETE /api/meds/$remoteId -> 404; removendo também do Room")
-                commitLocal { dao.deleteKeepingHistoryForUser(localId, access.patientId) }
+                deleteLocalAndNotify(entity, access.patientId)
                 Result.success(Unit)
             } else {
                 falha(e, "DELETE /api/meds/$remoteId", null)
@@ -536,6 +627,8 @@ class MedicationRepository(
      * - Só marca como sincronizado após receber um ID remoto válido.
      * - Qualquer falha mantém o registro no Room. Sem conexão interrompe o laço (falha para o
      *   WorkManager tentar de novo); erros HTTP de um item não impedem os demais.
+     * - Cada medicamento enviado com sucesso grava (ou já tinha gravado) o aviso "Medicamento
+     *   cadastrado"; a chave é por ID local, então nunca duplica.
      *
      * Etapa 2A: o comportamento para pendentes antigos criados por cuidador NÃO foi alterado
      * (decisão pendente, ver relatório).
@@ -559,7 +652,10 @@ class MedicationRepository(
                 val rotulo = "Medicamento '${pendente.nome}' (ID local: ${pendente.id})"
 
                 when (val envio = enviarPendente(pendente.id)) {
-                    is Envio.Enviado -> enviados++
+                    is Envio.Enviado -> {
+                        enviados++
+                        recordMedicationCreated(pendente.id)
+                    }
 
                     is Envio.SemConexao -> {
                         semConexao = true
