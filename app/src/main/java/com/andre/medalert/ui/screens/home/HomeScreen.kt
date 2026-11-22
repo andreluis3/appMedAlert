@@ -29,6 +29,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -56,6 +57,9 @@ import com.andre.medalert.ui.theme.MedAlertStatusGreen
 import com.andre.medalert.ui.theme.MedAlertTextPrimary
 import com.andre.medalert.ui.theme.MedAlertTextSecondary
 import com.andre.medalert.viewmodel.HomeDoseUi
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.andre.medalert.viewmodel.HomeViewModel
 
 /** Quantas doses a lista compacta mostra antes do "Ver todas". */
@@ -92,6 +96,20 @@ fun HomeScreen(
         viewModel.messages.collect { message ->
             Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
         }
+    }
+
+    // Ao VOLTAR para a Home (do app em segundo plano ou de outra tela) o card de adesão consulta
+    // de novo. A primeira entrada já é carregada pelo ViewModel, então o primeiro ON_RESUME é ignorado.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, viewModel) {
+        var firstResume = true
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                if (firstResume) firstResume = false else viewModel.refreshAdherence()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     // Popup de permissões (aparece uma vez por abertura do app, se faltar algo).

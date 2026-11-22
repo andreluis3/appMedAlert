@@ -1,3 +1,4 @@
+
 package com.andre.medalert.ui.screens.settings
 
 import androidx.compose.foundation.background
@@ -26,8 +27,7 @@ import com.andre.medalert.ui.theme.MedAlertCard
 import com.andre.medalert.ui.theme.MedAlertPrimary
 import com.andre.medalert.ui.theme.MedAlertTextSecondary
 import com.andre.medalert.viewmodel.SettingsViewModel
-import androidx.compose.ui.platform.LocalContext
-import com.andre.medalert.notification.AlarmScheduler
+
 private val TextPrimary = Color.White
 
 @Composable
@@ -48,6 +48,7 @@ fun SettingsScreen(
             )
         }
     ) { innerPadding ->
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -56,12 +57,14 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 24.dp)
         ) {
+
             Text(
                 text = "Configurações",
                 color = TextPrimary,
                 fontSize = 26.sp,
                 fontWeight = FontWeight.Bold
             )
+
             Text(
                 text = "Preferências do aplicativo",
                 color = MedAlertPrimary,
@@ -87,14 +90,36 @@ fun SettingsScreen(
                         .background(MedAlertPrimary.copy(alpha = 0.15f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("A", color = MedAlertPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Text(
+                        "A",
+                        color = MedAlertPrimary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
                 }
+
                 Spacer(modifier = Modifier.width(12.dp))
+
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(uiState.userName, color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-                    Text(uiState.userEmail, color = MedAlertTextSecondary, fontSize = 13.sp)
+                    Text(
+                        uiState.userName,
+                        color = TextPrimary,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 16.sp
+                    )
+
+                    Text(
+                        uiState.userEmail,
+                        color = MedAlertTextSecondary,
+                        fontSize = 13.sp
+                    )
                 }
-                Icon(Icons.Default.ChevronRight, contentDescription = null, tint = MedAlertTextSecondary)
+
+                Icon(
+                    Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = MedAlertTextSecondary
+                )
             }
 
             SectionTitle("Notificações")
@@ -103,13 +128,18 @@ fun SettingsScreen(
                 icon = Icons.Default.Notifications,
                 label = "Lembretes de medicamentos",
                 checked = uiState.medicationReminders,
-                onCheckedChange = { viewModel.toggleMedicationReminders() }
+                onCheckedChange = {
+                    viewModel.toggleMedicationReminders()
+                }
             )
+
             SettingsToggleRow(
                 icon = Icons.Default.VolumeUp,
                 label = "Som dos alertas",
                 checked = uiState.alertSound,
-                onCheckedChange = { viewModel.toggleAlertSound() }
+                onCheckedChange = {
+                    viewModel.toggleAlertSound()
+                }
             )
 
             SectionTitle("Acessibilidade")
@@ -118,31 +148,28 @@ fun SettingsScreen(
                 icon = Icons.Default.TextFields,
                 label = "Texto ampliado",
                 checked = uiState.largeText,
-                onCheckedChange = { viewModel.toggleLargeText() }
+                onCheckedChange = {
+                    viewModel.toggleLargeText()
+                }
             )
+
             SettingsToggleRow(
                 icon = Icons.Default.DarkMode,
                 label = "Tema escuro",
                 checked = uiState.darkTheme,
-                onCheckedChange = { viewModel.toggleDarkTheme() }
+                onCheckedChange = {
+                    viewModel.toggleDarkTheme()
+                }
             )
 
             SectionTitle("Conta")
-            val context = LocalContext.current
-
-            SectionTitle("Demonstração (temporário)")
-
-            SettingsNavigationRow(
-                icon = Icons.Default.Notifications,
-                label = "🧪 Testar alerta em 1 minuto",
-                onClick = { AlarmScheduler.scheduleTestAlarmIn1Minute(context) }
-            )
 
             SettingsNavigationRow(
                 icon = Icons.Default.Person,
                 label = "Perfil",
                 onClick = onProfileClick
             )
+
             SettingsNavigationRow(
                 icon = Icons.Default.Logout,
                 label = "Sair",
@@ -162,7 +189,10 @@ private fun SectionTitle(text: String) {
         color = TextPrimary,
         fontWeight = FontWeight.SemiBold,
         fontSize = 14.sp,
-        modifier = Modifier.padding(top = 24.dp, bottom = 10.dp)
+        modifier = Modifier.padding(
+            top = 24.dp,
+            bottom = 10.dp
+        )
     )
 }
 
@@ -182,9 +212,22 @@ private fun SettingsToggleRow(
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, contentDescription = null, tint = MedAlertPrimary, modifier = Modifier.size(20.dp))
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MedAlertPrimary,
+            modifier = Modifier.size(20.dp)
+        )
+
         Spacer(modifier = Modifier.width(12.dp))
-        Text(label, color = TextPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
+
+        Text(
+            label,
+            color = TextPrimary,
+            fontSize = 14.sp,
+            modifier = Modifier.weight(1f)
+        )
+
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
@@ -215,9 +258,26 @@ private fun SettingsNavigationRow(
             .padding(horizontal = 14.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, contentDescription = null, tint = if (tint == TextPrimary) MedAlertPrimary else tint, modifier = Modifier.size(20.dp))
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = if (tint == TextPrimary) MedAlertPrimary else tint,
+            modifier = Modifier.size(20.dp)
+        )
+
         Spacer(modifier = Modifier.width(12.dp))
-        Text(label, color = tint, fontSize = 14.sp, modifier = Modifier.weight(1f))
-        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = MedAlertTextSecondary)
+
+        Text(
+            label,
+            color = tint,
+            fontSize = 14.sp,
+            modifier = Modifier.weight(1f)
+        )
+
+        Icon(
+            Icons.Default.ChevronRight,
+            contentDescription = null,
+            tint = MedAlertTextSecondary
+        )
     }
 }

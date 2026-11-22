@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.andre.medalert.data.local.AppDatabase
 import com.andre.medalert.data.local.UserPreferencesRepository
+import com.andre.medalert.data.mapper.HorarioDose
 import com.andre.medalert.data.remote.dto.DashboardResponse
 import com.andre.medalert.data.remote.dto.validationProblem
 import com.andre.medalert.data.repository.HistoryRepository
@@ -114,7 +115,7 @@ class AdherenceViewModel(application: Application) : AndroidViewModel(applicatio
                 else -> {
                     // Diagnóstico: servidor diz 0 tomadas. Há doses tomadas aqui ainda não enviadas?
                     if (!identity.isCaregiver && remote.dosesTom == 0) logPendingDoses(patientId)
-                    AdherenceUiState.Success(remote)
+                    AdherenceUiState.Success(remote.withLocalForgottenTimes())
                 }
             }
         } catch (e: CancellationException) {
@@ -162,6 +163,18 @@ class AdherenceViewModel(application: Application) : AndroidViewModel(applicatio
             // Diagnóstico não pode derrubar a tela.
         }
     }
+
+    /**
+     * O dashboard devolve os horários de "horariosEsq" em UTC (ex.: 03:53 para uma dose das 00:53).
+     * A tela mostra o horário do paciente, igual ao da tela de Medicamentos. Só se aplica à
+     * resposta do servidor: o cálculo local (Room) já vem no horário do paciente.
+     */
+    private fun DashboardResponse.withLocalForgottenTimes(): DashboardResponse =
+        copy(
+            horariosEsq = horariosEsq.map {
+                it.copy(horario = HorarioDose.horaUtcParaLocal(it.horario) ?: it.horario)
+            }
+        )
 
     private companion object {
         const val TAG = "AdherenceVM"

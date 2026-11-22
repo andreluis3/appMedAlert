@@ -52,4 +52,23 @@ object HorarioDose {
 
         return String.format(Locale.US, "%02d:%02d", local / 60, local % 60)
     }
+
+    /**
+     * Converte para o horário do paciente um horário que o BACKEND mandou em UTC, seja no formato
+     * "HH:mm" (ex.: o dashboard devolve "03:53") ou no ISO UTC ("1970-01-01T03:53:00.000Z").
+     *
+     * Diferente de [normalizar], que deixa "HH:mm" intacto (porque no app/Room "HH:mm" já é local),
+     * aqui "HH:mm" é tratado como UTC, pois é o que o dashboard (horariosEsq) entrega.
+     * Só deve ser usado em dados que vieram da API. Devolve null se o formato não for reconhecido.
+     */
+    fun horaUtcParaLocal(valor: String?): String? {
+        val texto = valor?.trim()
+        if (texto.isNullOrEmpty()) return null
+
+        val partes = HORA_LOCAL.matchEntire(texto) ?: HORA_ISO_UTC.matchEntire(texto) ?: return null
+        val utc = partes.groupValues[1].toInt() * 60 + partes.groupValues[2].toInt()
+        val local = ((utc + OFFSET_BACKEND_MINUTOS) % MINUTOS_DIA + MINUTOS_DIA) % MINUTOS_DIA
+
+        return String.format(Locale.US, "%02d:%02d", local / 60, local % 60)
+    }
 }

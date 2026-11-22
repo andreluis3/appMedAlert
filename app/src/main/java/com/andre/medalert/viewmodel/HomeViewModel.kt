@@ -10,7 +10,11 @@ import com.andre.medalert.data.schedule.CaregiverDoseSchedule
 import com.andre.medalert.data.schedule.DoseScheduleCalculator
 import com.andre.medalert.data.schedule.SessionMedications
 import com.andre.medalert.data.local.UserPreferencesRepository
+import com.andre.medalert.data.remote.dto.DashboardResponse
+import com.andre.medalert.data.remote.dto.parsePercentOrNull
+import com.andre.medalert.data.remote.dto.validationProblem
 import com.andre.medalert.data.schedule.LocalAdherence
+import com.andre.medalert.util.AppLog
 import com.andre.medalert.data.session.LinkState
 import com.andre.medalert.data.session.PatientContextProvider
 import com.andre.medalert.data.schedule.SessionUser
@@ -20,6 +24,7 @@ import com.andre.medalert.notification.DoseRegisterResult
 import com.andre.medalert.notification.NotificationHelper
 import com.andre.medalert.notification.SnoozeStore
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -38,11 +43,13 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 data class HomeDoseUi(
     val key: String,
@@ -93,7 +100,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val medicationRepository = MedicationRepository(db.medicationDao(), prefs)
     private val historyRepository = HistoryRepository(db.doseHistoryDao())
 
-    private val adherence = MutableStateFlow("Sem dados")
+    /** Texto do card "Adesão ao tratamento". "Sem dados" quando não há como avaliar (nunca "0%" falso). */
+    private val adherence = MutableStateFlow(NO_ADHERENCE_DATA)
+
+    /** Cada incremento pede uma nova consulta da adesão (ver [refreshAdherence]). */
+    private val adherenceRefreshKey = MutableStateFlow(0)
+
+    /** Paciente a quem o texto atual do card pertence: ao mudar, o valor antigo é descartado. */
+    private var adherencePatientId: Int? = null
 
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
 
@@ -182,29 +196,86 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     init {
         // Reage à sessão: quando o cuidador aceita o vínculo o paciente_id muda e a Home carrega
         // os dados do paciente sem recriar o ViewModel nem pedir novo login.
+        // Offline-first: se falhar, a Home continua com o que já está no Room.
         viewModelScope.launch {
             patientIdFlow.collectLatest { patientId ->
-                if (patientId == null) {
-                    adherence.value = "Sem dados"
-                    return@collectLatest
-                }
-                // Offline-first: se falhar, a Home continua com o que já está no Room.
-                medicationRepository.refreshForCurrentUser()
-                val dashboard = runCatching { historyRepository.getDashboard(patientId) }.getOrNull()
-                adherence.value = if (dashboard != null && dashboard.dosesEsp > 0) {
-                    formatPercent(dashboard.adesao)
-                } else {
-                    // Sem internet, erro do servidor ou servidor sem dados: calcula com o Room.
-                    runCatching { LocalAdherence.compute(getApplication(), patientId) }
-                        .getOrNull()
-                        ?.takeIf { it.expected > 0 }
-                        ?.percent
-                        ?.let { "$it%" }
-                        ?: "Sem dados"
-                }
+                if (patientId != null) medicationRepository.refreshForCurrentUser()
             }
         }
+
+        // Adesão: consulta ao abrir, ao trocar de paciente e sempre que [refreshAdherence] for
+        // chamado (voltar para a Home, dose registrada). Uma consulta nova cancela a anterior.
+        viewModelScope.launch {
+            combine(patientIdFlow, adherenceRefreshKey) { patientId, _ -> patientId }
+                .collectLatest { patientId -> updateAdherence(patientId) }
+        }
     }
+
+    /**
+     * Pede ao card de adesão que consulte de novo. Seguro chamar várias vezes (a consulta em
+     * andamento é cancelada e refeita). A Home chama ao voltar para a tela.
+     */
+    fun refreshAdherence() {
+        adherenceRefreshKey.update { it + 1 }
+    }
+
+    private suspend fun updateAdherence(patientId: Int?) {
+        if (patientId == null) {
+            adherencePatientId = null
+            adherence.value = NO_ADHERENCE_DATA
+            return
+        }
+        // Nunca mostra a adesão do paciente anterior enquanto a nova carrega.
+        if (patientId != adherencePatientId) {
+            adherencePatientId = patientId
+            adherence.value = NO_ADHERENCE_DATA
+        }
+
+        val label = loadAdherenceLabel(patientId)
+        // null = não deu para consultar agora (sem internet etc.): mantém o último valor válido.
+        if (label != null && adherencePatientId == patientId) adherence.value = label
+    }
+
+    /**
+     * Texto do card para [patientId]:
+     * - resposta do servidor válida com percentual legível -> o percentual dele ("0%" só se o
+     *   servidor realmente disse 0);
+     * - servidor sem doses para avaliar -> cálculo no Room (como antes), ou "Sem dados";
+     * - resposta malformada ou percentual ilegível -> "Sem dados" (NUNCA vira "0%");
+     * - falha de rede/servidor -> cálculo no Room, ou null (mantém o valor anterior).
+     */
+    private suspend fun loadAdherenceLabel(patientId: Int): String? {
+        val dashboard: DashboardResponse = try {
+            historyRepository.getDashboard(patientId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return localAdherenceLabel(patientId)
+        }
+
+        if (dashboard.dosesEsp <= 0) return localAdherenceLabel(patientId) ?: NO_ADHERENCE_DATA
+
+        val problem = dashboard.validationProblem()
+        if (problem != null) {
+            AppLog.w(TAG, "dashboard inválido ($problem): card sem dados, id=$patientId")
+            return NO_ADHERENCE_DATA
+        }
+
+        val percent = parsePercentOrNull(dashboard.adesao) ?: return NO_ADHERENCE_DATA
+        return formatPercentLabel(percent)
+    }
+
+    private suspend fun localAdherenceLabel(patientId: Int): String? =
+        try {
+            LocalAdherence.compute(getApplication(), patientId)
+                ?.takeIf { it.expected > 0 }
+                ?.percent
+                ?.let { formatPercentLabel(it.toFloat()) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
 
     /**
      * Registra a dose como tomada. SÓ O PACIENTE registra a própria dose: o cuidador acompanha em
@@ -237,6 +308,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         NotificationHelper.notificationIdFor(dose.medicationLocalId)
                     )
                     _messages.tryEmit("Dose registrada.")
+                    // Atualiza o card já e de novo depois, dando tempo de o envio ao servidor terminar.
+                    refreshAdherence()
+                    delay(ADHERENCE_REFRESH_AFTER_DOSE_MS)
+                    refreshAdherence()
                 }
 
                 DoseRegisterResult.ALREADY_REGISTERED ->
@@ -319,9 +394,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    /** "23.6" -> "23,6%", "50.0" -> "50%". Só formata, não recalcula. */
-    private fun formatPercent(raw: String): String {
-        val clean = raw.trim().removeSuffix("%").removeSuffix(".0")
-        return clean.replace('.', ',') + "%"
+    /** 23.6f -> "23,6%", 50f -> "50%", 66.666f -> "66,7%". Só formata, não recalcula. */
+    private fun formatPercentLabel(value: Float): String {
+        val rounded = String.format(Locale("pt", "BR"), "%.1f", value.coerceIn(0f, 100f))
+        return rounded.removeSuffix(",0") + "%"
+    }
+
+    private companion object {
+        const val TAG = "HomeVM"
+        const val NO_ADHERENCE_DATA = "Sem dados"
+        const val ADHERENCE_REFRESH_AFTER_DOSE_MS = 6_000L
     }
 }
