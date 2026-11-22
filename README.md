@@ -1,280 +1,440 @@
-# 💊 MedAlert
+# 💊 DOSY
+### Sistema Inteligente de Apoio ao Uso de Medicamentos
 
-**Sistema Inteligente de Apoio ao Uso de Medicamentos**
+O **DOSY** é um aplicativo mobile desenvolvido para auxiliar pacientes no gerenciamento, organização e acompanhamento de suas rotinas de medicamentos.
 
-O **MedAlert** é um aplicativo mobile desenvolvido com o objetivo de auxiliar usuários no **controle, organização e acompanhamento do uso de medicamentos**.
+A aplicação oferece recursos para cadastro de medicamentos, configuração de horários, lembretes, acompanhamento de doses, histórico de utilização e monitoramento da adesão ao tratamento.
 
-O projeto busca facilitar a rotina de pessoas que precisam utilizar medicamentos em horários específicos, oferecendo recursos para cadastro de medicamentos, definição de horários, lembretes, acompanhamento das doses e visualização do histórico de utilização.
+Um dos principais diferenciais do projeto é a possibilidade de vincular pacientes a cuidadores, permitindo que familiares ou responsáveis acompanhem informações relacionadas à rotina de medicamentos.
 
-> 🚧 **Projeto em desenvolvimento**
-> Este repositório contém o desenvolvimento atual do MedAlert. Novas funcionalidades, melhorias e integrações serão adicionadas ao longo do projeto.
+🚧 **Projeto em desenvolvimento**
+
+O DOSY está sendo desenvolvido por uma equipe de cinco estudantes de Engenharia da Computação, utilizando tecnologias Android e uma arquitetura organizada em camadas, com integração a uma API e serviços de notificações.
 
 ---
 
-## 🎯 Objetivo
+## 🎓 Origem do projeto
 
-O objetivo principal do MedAlert é desenvolver uma ferramenta que ajude o usuário a manter uma rotina mais organizada em relação ao uso de seus medicamentos.
+O DOSY surgiu como parte de uma disciplina de **Projeto Multidisciplinar**, componente curricular do curso de Engenharia da Computação.
 
-A aplicação pretende permitir que o usuário:
+A proposta da disciplina é proporcionar aos estudantes a oportunidade de desenvolver uma solução tecnológica para um problema real, aplicando conhecimentos adquiridos ao longo da graduação.
 
-* 💊 Cadastre seus medicamentos;
-* ⏰ Defina horários para cada medicamento;
-* 🔔 Receba lembretes para tomar seus medicamentos;
-* ✅ Registre medicamentos que foram tomados;
-* 📅 Consulte medicamentos programados no calendário;
-* 📊 Acompanhe sua adesão ao tratamento;
-* 📖 Consulte o histórico de medicamentos;
-* 👨‍👩‍👧 Cadastre responsáveis ou acompanhantes;
-* ⚙️ Configure preferências do aplicativo.
+A equipe identificou a necessidade de uma ferramenta que facilitasse a organização do uso de medicamentos, principalmente para pessoas que precisam seguir tratamentos com horários e dosagens específicas.
+
+A partir dessa necessidade, foi idealizado o DOSY: uma solução mobile que combina desenvolvimento Android, engenharia de software, integração entre sistemas, banco de dados e serviços de notificações.
+
+Além da construção da aplicação, o projeto envolve planejamento, documentação, desenvolvimento colaborativo, controle de versão e integração entre diferentes componentes de software.
+
+---
+
+## 🎯 Objetivos
+
+O principal objetivo do DOSY é facilitar o gerenciamento da rotina de medicamentos, proporcionando maior organização e acompanhamento do tratamento.
+
+A aplicação busca:
+
+- 💊 Permitir o cadastro e gerenciamento de medicamentos;
+- ⏰ Organizar horários e dosagens;
+- 🔔 Disponibilizar lembretes de medicamentos;
+- ✅ Registrar doses e acompanhar suas situações;
+- 📅 Consultar a programação de medicamentos;
+- 📊 Acompanhar indicadores de adesão;
+- 📖 Consultar o histórico de utilização;
+- 👨‍👩‍👧 Permitir o vínculo entre pacientes e cuidadores;
+- 📲 Enviar notificações relacionadas ao acompanhamento;
+- 🔐 Gerenciar usuários e suas permissões.
 
 ---
 
 ## 📱 Funcionalidades
 
-O projeto está sendo desenvolvido de forma incremental.
-
-Entre as funcionalidades planejadas e em desenvolvimento estão:
-
 ### 🏠 Início
 
-A tela inicial apresenta um resumo da rotina de medicamentos do usuário.
+Apresenta um resumo da rotina de medicamentos do paciente.
 
-Entre as informações apresentadas estão:
+Informações disponíveis:
 
-* Medicamentos programados para o dia;
-* Horários dos medicamentos;
-* Status das doses;
-* Porcentagem de adesão ao tratamento;
-* Quantidade de responsáveis acompanhando o usuário.
+- Medicamentos programados;
+- Horários de administração;
+- Situação das doses;
+- Indicadores de adesão ao tratamento;
+- Informações relacionadas ao acompanhamento.
 
 ### 💊 Medicamentos
 
-Tela destinada ao gerenciamento dos medicamentos cadastrados.
+Permite gerenciar os medicamentos utilizados pelo paciente.
 
-Funcionalidades previstas:
-
-* Visualização dos medicamentos;
-* Cadastro de medicamento;
-* Edição de medicamento;
-* Exclusão de medicamento;
-* Definição de dosagem;
-* Definição de horários;
-* Definição de frequência;
-* Data de início e término;
-* Observações.
-
-### ⏰ Horários personalizados
-
-Além dos horários pré-definidos, o usuário poderá escolher um **horário personalizado**, utilizando um seletor semelhante ao de um despertador de celular.
-
-Isso permite, por exemplo, configurar:
-
-* 07:15
-* 09:40
-* 13:25
-* 18:35
-* 22:10
-
-Também será possível configurar múltiplos horários para um mesmo medicamento.
+- Cadastro de medicamentos;
+- Edição e exclusão;
+- Nome e dosagem;
+- Múltiplos horários;
+- Frequência de utilização;
+- Data de início e término;
+- Observações.
 
 ### 📅 Calendário
 
-O calendário permitirá visualizar os medicamentos programados de acordo com as datas.
-
-Futuramente, essa funcionalidade será integrada aos dados armazenados no banco de dados.
+Permite visualizar a programação dos medicamentos de acordo com as datas, facilitando a organização da rotina.
 
 ### 📖 Histórico
 
-O histórico será utilizado para acompanhar os registros de utilização dos medicamentos.
+Centraliza os registros relacionados à utilização dos medicamentos.
 
-A aplicação deverá permitir consultar informações como:
+Entre as informações acompanhadas estão:
 
-* Medicamentos tomados;
-* Medicamentos não tomados;
-* Horário programado;
-* Horário em que o medicamento foi tomado;
-* Registros de hoje;
-* Registros da semana;
-* Registros do mês;
-* Histórico por período.
+- Doses tomadas;
+- Doses pendentes ou não tomadas;
+- Horário programado;
+- Horário de confirmação;
+- Registros por período.
 
 ### 📊 Adesão ao tratamento
 
-O MedAlert também contará com um indicador de adesão ao tratamento.
+Apresenta indicadores relacionados ao cumprimento da rotina de medicamentos.
 
-A porcentagem será calculada futuramente a partir dos registros reais de medicamentos tomados e não tomados.
+A proposta é utilizar os registros de doses programadas e suas respectivas situações para calcular a porcentagem de adesão ao tratamento.
 
-Exemplo:
+### 👨‍👩‍👧 Paciente e cuidador
 
-**92%**
+O DOSY possui dois perfis principais de utilização.
 
-Adesão ao tratamento
+**Paciente**
 
-### 👨‍👩‍👧 Responsáveis e acompanhantes
+É o responsável pelos próprios dados e pela administração de sua rotina.
 
-O usuário poderá cadastrar pessoas responsáveis pelo acompanhamento de sua rotina de medicamentos.
+Pode:
 
-Essa funcionalidade poderá permitir futuramente:
+- Gerenciar medicamentos;
+- Configurar horários;
+- Registrar doses;
+- Consultar histórico;
+- Acompanhar indicadores;
+- Solicitar vínculo com um cuidador.
 
-* Adicionar responsável;
-* Editar responsável;
-* Remover responsável;
-* Acompanhar informações relacionadas à rotina de medicamentos.
+**Cuidador**
 
-### ⚙️ Configurações
+É responsável pelo acompanhamento de um paciente vinculado.
 
-Área destinada às configurações e preferências do aplicativo.
+Pode:
+
+- Visualizar os medicamentos do paciente;
+- Consultar horários programados;
+- Acompanhar a situação das doses;
+- Receber notificações relacionadas ao paciente;
+- Acompanhar informações da rotina de utilização.
+
+O cuidador possui acesso de acompanhamento, respeitando as permissões estabelecidas pelo sistema. O gerenciamento dos medicamentos permanece sob responsabilidade do paciente.
+
+**Fluxo de vinculação:**
+
+1. O paciente solicita o vínculo com um cuidador.
+2. O cuidador recebe a solicitação.
+3. O cuidador aceita a solicitação.
+4. O sistema estabelece o vínculo entre os usuários.
+5. O cuidador passa a visualizar as informações do paciente autorizado.
 
 ---
 
-# 🏗️ Desenvolvimento atual
+## 🔔 Sistema de notificações
 
-Neste momento, o projeto está concentrado principalmente no desenvolvimento da **interface e experiência do usuário**.
+O DOSY utiliza uma estrutura de notificações que combina lembretes no dispositivo e notificações push.
 
-A aplicação já possui a estrutura inicial das principais telas e navegação entre elas.
+O objetivo é auxiliar o paciente a lembrar dos horários dos medicamentos e permitir que o cuidador receba informações importantes sobre o acompanhamento.
 
-Atualmente estamos utilizando **dados mockados** para desenvolver e testar a interface antes da implementação completa do backend.
+### 1. Lembretes do paciente
 
-A estratégia de desenvolvimento é:
+O aplicativo trabalha com lembretes relacionados aos horários programados dos medicamentos.
 
-```text
-Interface
-   ↓
-Navegação
-   ↓
-Componentes
-   ↓
-Modelos de dados
-   ↓
-Backend
-   ↓
-Banco de dados
-   ↓
-Notificações e funcionalidades reais
+O fluxo geral é:
+
+1. O paciente cadastra um medicamento.
+2. Define os horários de administração.
+3. O aplicativo organiza os lembretes correspondentes.
+4. No horário programado, o dispositivo apresenta uma notificação.
+5. O paciente pode acessar o aplicativo para acompanhar e registrar a situação da dose.
+
+### 2. Notificações push para o cuidador
+
+Para a comunicação entre dispositivos, o projeto utiliza o **Firebase Cloud Messaging (FCM)**.
+
+Diferentemente dos lembretes locais, as notificações push permitem que um dispositivo receba informações enviadas pelo backend, mesmo quando o aplicativo não está aberto.
+
+O funcionamento envolve:
+
+1. O cuidador realiza o login no aplicativo.
+2. O dispositivo obtém seu token de registro do Firebase Cloud Messaging.
+3. O aplicativo disponibiliza esse token para o backend.
+4. O backend associa o dispositivo ao usuário correspondente.
+5. Quando ocorre um evento relacionado ao acompanhamento do paciente, o backend identifica o cuidador vinculado.
+6. O servidor solicita o envio de uma notificação ao Firebase Cloud Messaging.
+7. O FCM encaminha a mensagem ao dispositivo do cuidador.
+8. O aplicativo recebe e apresenta a notificação.
+
+### Fluxograma das notificações push
+
+```mermaid
+flowchart TD
+    A["Paciente realiza uma ação"] --> B["Backend recebe o evento"]
+    B --> C["Backend identifica o paciente"]
+    C --> D["Verifica cuidadores vinculados"]
+    D --> E["Obtém o token FCM do cuidador"]
+    E --> F["Firebase Cloud Messaging"]
+    F --> G["Dispositivo do cuidador"]
+    G --> H["Aplicativo apresenta a notificação"]
+
+    style A fill:#193C37,color:#fff
+    style F fill:#26394C,color:#fff
+    style H fill:#193C37,color:#fff
 ```
 
+**Tecnologias envolvidas:**
+
+- Firebase Cloud Messaging: entrega de notificações push;
+- Backend: processamento dos eventos e identificação dos destinatários;
+- DataStore: gerenciamento de informações da sessão;
+- Android: recebimento e apresentação das notificações.
+
+A persistência de uma central de notificações, com consulta de registros e controle de leitura, também faz parte da evolução da integração com o backend.
+
 ---
 
-# 🧱 Arquitetura planejada
+## 🏗️ Arquitetura do aplicativo
 
-A aplicação está sendo desenvolvida visando uma arquitetura que permita a evolução do projeto sem necessidade de reescrever as telas existentes.
+O DOSY utiliza o padrão arquitetural **MVVM (Model-View-ViewModel)** em conjunto com o padrão Repository.
 
-A estrutura planejada futuramente será semelhante a:
+Essa arquitetura organiza o código em responsabilidades separadas, evitando que as telas precisem conhecer diretamente os detalhes de comunicação com o servidor ou do armazenamento local.
 
-```text
-UI / Jetpack Compose
-        ↓
-    ViewModel
-        ↓
-   Repository
-        ↓
-      DAO
-        ↓
-      Room
-        ↓
-     SQLite
+### Fluxograma da arquitetura
+
+```mermaid
+flowchart TD
+    A["SCREEN - Jetpack Compose"] --> B["VIEWMODEL"]
+    B --> C["REPOSITORY"]
+
+    C --> D["ROOM - DAO"]
+    C --> E["RETROFIT - API SERVICE"]
+
+    D --> F["SQLite - Banco local"]
+    E --> G["BACKEND - API REST"]
+
+    G --> H["Banco de dados do servidor"]
+
+    I["DATASTORE"] --> B
+
+    J["Firebase Cloud Messaging"] --> K["Notificações Android"]
+
+    G -. "Eventos de notificação" .-> J
+
+    style A fill:#26394C,color:#fff
+    style B fill:#26394C,color:#fff
+    style C fill:#26394C,color:#fff
+    style D fill:#193C37,color:#fff
+    style E fill:#193C37,color:#fff
+    style F fill:#193C37,color:#fff
+    style G fill:#26394C,color:#fff
+    style H fill:#193C37,color:#fff
+    style I fill:#193C37,color:#fff
+    style J fill:#26394C,color:#fff
 ```
 
-Essa estrutura permitirá separar a interface da lógica de negócio e da persistência dos dados.
+### Como funciona cada camada?
+
+**1. Screen (View)**
+
+É a camada de interface desenvolvida com Jetpack Compose.
+
+Responsabilidades:
+
+- Construir as telas;
+- Apresentar informações;
+- Capturar interações do usuário;
+- Observar os estados disponibilizados pelo ViewModel.
+
+As Screens não devem acessar diretamente o banco de dados ou realizar requisições HTTP.
+
+**2. ViewModel (VM)**
+
+É responsável por gerenciar os estados e as ações de cada tela.
+
+Responsabilidades:
+
+- Receber eventos das Screens;
+- Solicitar operações aos Repositories;
+- Processar informações necessárias para a apresentação;
+- Disponibilizar estados para a interface;
+- Controlar estados de carregamento, sucesso e erro.
+
+A comunicação entre Screen e ViewModel permite que a interface seja atualizada conforme os dados mudam.
+
+**3. Repository**
+
+É a camada responsável por centralizar o acesso aos dados.
+
+Ela faz a comunicação entre os ViewModels e as fontes de dados disponíveis.
+
+No DOSY, o Repository coordena o acesso ao armazenamento local e aos serviços remotos, evitando que a lógica de acesso aos dados fique espalhada pelas telas.
+
+**4. DAO e Room**
+
+O Room é utilizado para persistência local, enquanto os DAOs definem as operações de acesso às entidades armazenadas.
+
+O banco local utiliza SQLite.
+
+O projeto adota uma abordagem offline-first, utilizando o armazenamento local como referência para os dados disponibilizados à interface e coordenando a sincronização com o servidor.
+
+**5. Retrofit e API Service**
+
+O Retrofit é utilizado para realizar a comunicação HTTP entre o aplicativo Android e o backend.
+
+Os serviços definem as operações disponíveis para comunicação com a API.
+
+O Repository utiliza esses serviços para enviar e receber informações, como dados de usuários, medicamentos e registros de utilização.
+
+**6. DataStore**
+
+O DataStore é utilizado para armazenar informações relacionadas à sessão do usuário.
+
+Entre os dados gerenciados estão:
+
+- Identificação do usuário;
+- Token de autenticação;
+- Tipo de usuário;
+- Identificação do paciente vinculado;
+- Informações básicas da conta.
+
+Essas informações permitem que o aplicativo identifique se o usuário está utilizando o perfil de paciente ou cuidador.
+
+**7. Backend e banco de dados**
+
+O backend é responsável pelo processamento das requisições, validação das operações e gerenciamento dos dados compartilhados entre os dispositivos.
+
+O aplicativo não acessa diretamente o banco de dados remoto. A comunicação acontece por meio da API REST.
 
 ---
 
-# 🗃️ Dados e Backend
+## 🔄 Fluxo de comunicação entre as camadas
 
-O backend ainda está em desenvolvimento.
+Para compreender a arquitetura, é importante entender como uma operação acontece dentro do aplicativo.
 
-Entre as estruturas de dados que deverão ser implementadas futuramente estão:
+O fluxo padrão segue esta sequência:
 
-```text
-User
- ├── id
- ├── name
- └── ...
+1. O usuário realiza uma ação em uma Screen.
+2. A Screen comunica o evento ao ViewModel.
+3. O ViewModel solicita a operação ao Repository.
+4. O Repository consulta a fonte de dados apropriada.
+5. O resultado retorna ao ViewModel.
+6. O ViewModel atualiza o estado da tela.
+7. O Jetpack Compose identifica a alteração e atualiza a interface.
 
-Medication
- ├── id
- ├── name
- ├── dosage
- ├── schedules
- ├── frequency
- ├── startDate
- ├── endDate
- └── notes
-
-MedicationHistory
- ├── id
- ├── medicationId
- ├── scheduledTime
- ├── takenAt
- ├── status
- └── date
-
-Responsible
- ├── id
- ├── name
- ├── relationship
- └── ...
-```
-
-A estrutura definitiva será definida durante a implementação do backend.
+Esse processo permite que as responsabilidades permaneçam separadas, facilitando a manutenção e a evolução do sistema.
 
 ---
 
-# 🛠️ Tecnologias
+## 🌐 Integração com API
 
-O projeto está sendo desenvolvido utilizando tecnologias voltadas para desenvolvimento Android:
+O DOSY possui integração com um backend por meio de uma **API REST**.
 
-* **Kotlin**
-* **Android Studio**
-* **Jetpack Compose**
-* **Material 3**
-* **Git**
-* **GitHub**
+A API funciona como intermediária entre o aplicativo Android e o banco de dados remoto, centralizando o processamento das operações.
 
-Tecnologias adicionais, como **Room**, serão incorporadas posteriormente durante a implementação da persistência dos dados.
+A comunicação é realizada utilizando Retrofit, com requisições HTTP e troca de informações em formato JSON.
 
----
+Entre as responsabilidades da API estão:
 
-# 👨‍💻 Equipe
+- Autenticação de usuários;
+- Gerenciamento de pacientes e cuidadores;
+- Cadastro e gerenciamento de medicamentos;
+- Consulta de informações;
+- Registro de utilização dos medicamentos;
+- Gerenciamento dos vínculos entre usuários;
+- Integração com serviços de notificações.
 
-O MedAlert está sendo desenvolvido por **5 estudantes de Engenharia da Computação**.
+A comunicação entre o aplicativo e o backend é organizada por meio de Repositories e serviços específicos, mantendo a interface independente dos detalhes da API.
 
-O projeto faz parte do processo de aprendizado e desenvolvimento acadêmico da equipe, envolvendo conceitos de:
-
-* Desenvolvimento mobile;
-* Engenharia de software;
-* Programação orientada a objetos;
-* Arquitetura de software;
-* Banco de dados;
-* Interface e experiência do usuário;
-* Desenvolvimento colaborativo;
-* Controle de versão.
+> A implementação do backend é desenvolvida separadamente do aplicativo Android, permitindo que as duas partes evoluam de forma independente, respeitando os contratos de comunicação estabelecidos.
 
 ---
 
-# 📚 Contexto acadêmico
+## 📴 Persistência e funcionamento offline
 
-O desenvolvimento do MedAlert proporciona à equipe a oportunidade de aplicar conhecimentos adquiridos ao longo do curso de **Engenharia da Computação** em um projeto prático.
+O DOSY utiliza Room e SQLite para armazenamento local.
 
-Além do desenvolvimento da aplicação, o projeto envolve planejamento, documentação, organização do código, controle de versões e evolução incremental do sistema.
+Essa estrutura permite que informações sejam disponibilizadas no dispositivo sem depender exclusivamente de uma consulta ao servidor a cada interação.
 
----
+O DataStore complementa essa estrutura, armazenando informações relacionadas à sessão do usuário.
 
----
-
-# 📌 Repositório
-
-Este repositório contém o desenvolvimento do **MedAlert**, desde sua estrutura inicial até a implementação progressiva de suas funcionalidades.
-
-O projeto será atualizado conforme novas funcionalidades forem desenvolvidas pela equipe.
-
-```text
-MedAlert
-Sistema Inteligente de Apoio ao Uso de Medicamentos
-```
+A estratégia offline-first busca oferecer uma experiência mais consistente, organizando a persistência local e a sincronização com o backend.
 
 ---
 
-## 📄 Licença
+## 🛠️ Tecnologias utilizadas
 
-Este projeto está sendo desenvolvido para fins **acadêmicos e educacionais**.
+| Tecnologia | Finalidade |
+|---|---|
+| Kotlin | Linguagem principal |
+| Android Studio | Ambiente de desenvolvimento |
+| Jetpack Compose | Construção das interfaces |
+| Material 3 | Componentes e identidade visual |
+| MVVM | Organização da arquitetura |
+| ViewModel | Gerenciamento de estados |
+| Repository Pattern | Organização do acesso aos dados |
+| Retrofit | Comunicação com API |
+| Room | Persistência local |
+| SQLite | Banco de dados local |
+| DataStore | Gerenciamento de sessão |
+| Firebase Cloud Messaging | Notificações push |
+| Git | Controle de versão |
+| GitHub | Colaboração e gerenciamento do código |
+
+---
+
+## 👨‍💻 Equipe
+
+O DOSY está sendo desenvolvido por cinco estudantes de Engenharia da Computação.
+
+O trabalho envolve colaboração entre os integrantes nas diferentes etapas do desenvolvimento, incluindo:
+
+- Desenvolvimento Android;
+- Desenvolvimento e integração com backend;
+- Modelagem e gerenciamento de dados;
+- Engenharia de software;
+- Interface e experiência do usuário;
+- Integração de serviços;
+- Testes e documentação;
+- Controle de versão.
+
+---
+
+## 📚 Aprendizados e conhecimentos aplicados
+
+O desenvolvimento do DOSY proporciona a aplicação prática de conhecimentos adquiridos ao longo da graduação.
+
+Entre os principais conceitos envolvidos estão:
+
+- Programação orientada a objetos;
+- Desenvolvimento mobile;
+- Arquitetura MVVM;
+- Padrão Repository;
+- Banco de dados relacionais;
+- Persistência local;
+- APIs REST;
+- Comunicação entre sistemas;
+- Autenticação e gerenciamento de sessão;
+- Notificações push;
+- Desenvolvimento colaborativo;
+- Engenharia de software.
+
+---
+
+## 📌 Repositório
+
+Este repositório contém o desenvolvimento da aplicação Android do DOSY, incluindo sua arquitetura, interfaces, integração com API e funcionalidades de acompanhamento de medicamentos.
+
+O projeto continua em desenvolvimento e recebe atualizações conforme a evolução das funcionalidades e integrações.
+
+**DOSY — Tecnologia a favor do cuidado e da organização da saúde.**
+
+---
+
+### 📄 Licença
+
+Este projeto está sendo desenvolvido para fins acadêmicos e educacionais, como parte de uma disciplina de Projeto Multidisciplinar do curso de Engenharia da Computação.
