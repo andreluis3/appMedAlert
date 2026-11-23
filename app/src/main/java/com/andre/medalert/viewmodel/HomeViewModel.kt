@@ -10,6 +10,8 @@ import com.andre.medalert.data.schedule.CaregiverDoseSchedule
 import com.andre.medalert.data.schedule.DoseScheduleCalculator
 import com.andre.medalert.data.schedule.SessionMedications
 import com.andre.medalert.data.local.UserPreferencesRepository
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import com.andre.medalert.data.remote.dto.DashboardResponse
 import com.andre.medalert.data.remote.dto.parsePercentOrNull
 import com.andre.medalert.data.remote.dto.validationProblem
@@ -86,7 +88,9 @@ data class HomeUiState(
      * vira true quando o PatientContext confirma que a sessão é de paciente: assim o botão
      * "Registrar" nunca aparece, nem por um instante, para o cuidador.
      */
-    val canRegisterDoses: Boolean = false
+    val canRegisterDoses: Boolean = false,
+    // Novo: responsável salvo localmente.
+    val responsibleName: String? = null
 )
 
 private val HORA_FORMAT = DateTimeFormatter.ofPattern("HH:mm")
@@ -133,6 +137,32 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * Doses já tomadas (registradas pela notificação), como "idLocal-horárioPrevistoMillis".
      * Observa o Room, então a Home atualiza sozinha quando "Tomar agora" é tocado.
      */
+
+    /**
+     * Primeiro responsável convidado pelo paciente.
+     *
+     * Observa o DataStore em tempo real.
+     * Não consulta API e não considera convite como vínculo confirmado.
+     */
+    private val responsibleNameFlow: Flow<String?> = prefs.session
+        .flatMapLatest { session ->
+            val isPatient = !AccessPolicy.isCaregiver(session.tipo)
+            val patientId = session.userId?.takeIf { it > 0 }
+
+            if (!isPatient || patientId == null) {
+                flowOf(null)
+            } else {
+                prefs.sentInvites(patientId)
+                    .map { invites ->
+                        invites.firstOrNull()
+                            ?.nome
+                            ?.trim()
+                            ?.takeIf { it.isNotBlank() }
+                    }
+            }
+        }
+        .distinctUntilChanged()
+
     private val takenKeys: Flow<Set<String>> = patientIdFlow.flatMapLatest { patientId ->
         if (patientId == null) {
             flowOf(emptySet())
@@ -176,22 +206,47 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
         .distinctUntilChanged()
 
+    private val detailedLinkFlow = combine(
+        takenKeys,
+        linkState,
+        responsibleNameFlow
+    ) { taken, link, responsibleName ->
+        // Agrupamos em um Data Class auxiliar ou Triple para facilitar
+        Triple(taken, link, responsibleName)
+    }
+
+    // 2. Agora o combine principal terá apenas 5 parâmetros, o que o Kotlin suporta nativamente
     val uiState: StateFlow<HomeUiState> = combine(
         prefs.userName,
         SessionMedications.observe(application),
         ticker,
         adherence,
-        takenKeys.combine(linkState) { taken, link -> taken to link }
-    ) { name, medications, now, adherenceLabel, (taken, link) ->
-        build(name, medications, now, adherenceLabel, taken, link.isCaregiver)
-            .copy(
-                isCaregiver = link.isCaregiver,
-                awaitingLink = link.awaiting,
-                linkedPatientId = link.patientId,
-                linkedPatientName = link.patientName,
-                canRegisterDoses = link.canRegisterDoses
-            )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
+        detailedLinkFlow // Este flow agora conta como 1 único parâmetro
+    ) { name, medications, now, adherenceLabel, detailedLink ->
+
+        // Desestruturamos o flow agrupado
+        val (taken, link, responsibleName) = detailedLink
+
+        build(
+            name,
+            medications,
+            now,
+            adherenceLabel,
+            taken,
+            link.isCaregiver
+        ).copy(
+            isCaregiver = link.isCaregiver,
+            awaitingLink = link.awaiting,
+            linkedPatientId = link.patientId,
+            linkedPatientName = link.patientName,
+            canRegisterDoses = link.canRegisterDoses,
+            responsibleName = responsibleName
+        )
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        HomeUiState()
+    )
 
     init {
         // Reage à sessão: quando o cuidador aceita o vínculo o paciente_id muda e a Home carrega

@@ -246,8 +246,14 @@ fun HomeScreen(
                     StatCard(
                         modifier = Modifier.weight(1f),
                         icon = Icons.Filled.People,
-                        value = "—",
-                        label = "Responsáveis",
+                        value = state.responsibleName
+                            ?.substringBefore(" ")
+                            ?: "—",
+                        label = if (state.responsibleName != null) {
+                            "Responsável"
+                        } else {
+                            "Responsáveis"
+                        },
                         onClick = onResponsiblesClick
                     )
                 }

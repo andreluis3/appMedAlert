@@ -124,7 +124,7 @@ fun AddResponsibleScreen(
         MedAlertTextField(
             value = nome,
             onValueChange = { nome = it; nomeError = null },
-            placeholder = "Ex.: Maria Souza"
+            placeholder = ""
         )
         if (nomeError != null) {
             Spacer(modifier = Modifier.height(4.dp))
@@ -137,7 +137,7 @@ fun AddResponsibleScreen(
         MedAlertTextField(
             value = email,
             onValueChange = { email = it; emailError = null },
-            placeholder = "responsavel@email.com"
+            placeholder = ""
         )
         if (emailError != null) {
             Spacer(modifier = Modifier.height(4.dp))
