@@ -1,4 +1,3 @@
-
 package com.andre.medalert.ui.screens.settings
 
 import androidx.compose.foundation.background
@@ -73,7 +72,7 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Card de perfil
+            // Card Meu Perfil
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -90,33 +89,26 @@ fun SettingsScreen(
                         .background(MedAlertPrimary.copy(alpha = 0.15f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        "A",
-                        color = MedAlertPrimary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = "Meu perfil",
+                        tint = MedAlertPrimary,
+                        modifier = Modifier.size(23.dp)
                     )
                 }
 
                 Spacer(modifier = Modifier.width(12.dp))
 
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        uiState.userName,
-                        color = TextPrimary,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 16.sp
-                    )
-
-                    Text(
-                        uiState.userEmail,
-                        color = MedAlertTextSecondary,
-                        fontSize = 13.sp
-                    )
-                }
+                Text(
+                    text = "Meu perfil",
+                    color = TextPrimary,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp,
+                    modifier = Modifier.weight(1f)
+                )
 
                 Icon(
-                    Icons.Default.ChevronRight,
+                    imageVector = Icons.Default.ChevronRight,
                     contentDescription = null,
                     tint = MedAlertTextSecondary
                 )
@@ -163,12 +155,6 @@ fun SettingsScreen(
             )
 
             SectionTitle("Conta")
-
-            SettingsNavigationRow(
-                icon = Icons.Default.Person,
-                label = "Perfil",
-                onClick = onProfileClick
-            )
 
             SettingsNavigationRow(
                 icon = Icons.Default.Logout,

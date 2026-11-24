@@ -1,101 +1,86 @@
 package com.andre.medalert.ui.screens.responsibles
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.People
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.andre.medalert.data.model.ResponsavelUiModel
-import com.andre.medalert.data.repository.ResponsavelRepositoryApi
-import com.andre.medalert.data.local.UserPreferencesRepository
 import androidx.compose.ui.platform.LocalContext
+
+import com.andre.medalert.data.local.UserPreferencesRepository
+import com.andre.medalert.data.model.ResponsavelUiModel
 import com.andre.medalert.data.repository.ResponsavelRepository
-import com.andre.medalert.data.repository.STATUS_VINCULO_ATIVO
-import com.andre.medalert.ui.components.EmptyState
-import com.andre.medalert.ui.components.ErrorState
-import com.andre.medalert.ui.components.LoadingState
-import com.andre.medalert.ui.theme.MedAlertBackground
-import com.andre.medalert.ui.theme.MedAlertCard
-import com.andre.medalert.ui.theme.MedAlertPrimary
-import com.andre.medalert.ui.theme.MedAlertStatusGreen
-import com.andre.medalert.ui.theme.MedAlertStatusRed
-import com.andre.medalert.ui.theme.MedAlertTextPrimary
-import com.andre.medalert.ui.theme.MedAlertTextSecondary
+import com.andre.medalert.data.repository.ResponsavelRepositoryApi
+
+import com.andre.medalert.ui.theme.*
+
 import kotlinx.coroutines.launch
 
-private sealed interface ResponsiblesUiState {
-    object Loading : ResponsiblesUiState
-    data class Error(val message: String = "Não foi possível carregar os responsáveis.") : ResponsiblesUiState
-    data class Success(val responsaveis: List<ResponsavelUiModel>) : ResponsiblesUiState
-}
-
-/**
- * Tela "Responsáveis". A API não informa quem aceitou o convite (não há rota de listagem), então a
- * lista mostra os convites ENVIADOS a partir deste aparelho, com o status "Convite enviado".
- * Só aparece "Vínculo ativo" quando existir uma fonte confirmada para isso. "Remover" apaga só o
- * registro local do convite; não desfaz um vínculo já aceito.
- *
- * `reloadKey`: incremente esse valor de fora (ex.: ao voltar da tela de
- * adicionar) para forçar a tela a recarregar a lista.
- */
 @Composable
 fun ResponsiblesScreen(
     reloadKey: Int = 0,
-    repository: ResponsavelRepository = LocalContext.current.let { appContext ->
-        remember { ResponsavelRepositoryApi(UserPreferencesRepository(appContext.applicationContext)) }
+    repository: ResponsavelRepository = LocalContext.current.let { context ->
+        remember {
+            ResponsavelRepositoryApi(
+                UserPreferencesRepository(context.applicationContext)
+            )
+        }
     },
     onBackClick: () -> Unit = {},
     onAddClick: () -> Unit = {}
 ) {
-    val scope = rememberCoroutineScope()
-    var uiState by remember { mutableStateOf<ResponsiblesUiState>(ResponsiblesUiState.Loading) }
-    var responsavelParaRemover by remember { mutableStateOf<ResponsavelUiModel?>(null) }
 
-    suspend fun carregar() {
-        uiState = ResponsiblesUiState.Loading
-        runCatching { repository.listar() }
-            .onSuccess { uiState = ResponsiblesUiState.Success(it) }
-            .onFailure { uiState = ResponsiblesUiState.Error() }
+    val scope = rememberCoroutineScope()
+
+    var responsaveis by remember {
+        mutableStateOf<List<ResponsavelUiModel>>(emptyList())
     }
 
-    LaunchedEffect(reloadKey) { carregar() }
+    var carregando by remember {
+        mutableStateOf(true)
+    }
+
+    var erro by remember {
+        mutableStateOf(false)
+    }
+
+    var responsavelParaRemover by remember {
+        mutableStateOf<ResponsavelUiModel?>(null)
+    }
+
+    suspend fun carregar() {
+        carregando = true
+        erro = false
+
+        runCatching {
+            repository.listar()
+        }.onSuccess {
+            responsaveis = it
+        }.onFailure {
+            erro = true
+        }
+
+        carregando = false
+    }
+
+    LaunchedEffect(reloadKey) {
+        carregar()
+    }
 
     Column(
         modifier = Modifier
@@ -104,88 +89,138 @@ fun ResponsiblesScreen(
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
-        Column(modifier = Modifier.padding(horizontal = 20.dp)) {
-            TextButton(onClick = onBackClick, contentPadding = PaddingValues(0.dp)) {
+
+        // Cabeçalho
+        Column(
+            modifier = Modifier.padding(
+                horizontal = 20.dp
+            )
+        ) {
+
+            TextButton(
+                onClick = onBackClick,
+                contentPadding = PaddingValues(0.dp)
+            ) {
+
                 Icon(
                     Icons.Filled.ArrowBack,
                     contentDescription = null,
-                    tint = MedAlertTextSecondary,
-                    modifier = Modifier.size(18.dp)
+                    tint = MedAlertTextSecondary
                 )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Voltar", color = MedAlertTextSecondary, fontSize = 14.sp)
+
+                Spacer(Modifier.width(6.dp))
+
+                Text(
+                    "Voltar",
+                    color = MedAlertTextSecondary
+                )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(Modifier.height(12.dp))
 
             Text(
                 text = "Responsáveis",
                 color = MedAlertTextPrimary,
-                fontSize = 24.sp,
+                fontSize = 25.sp,
                 fontWeight = FontWeight.Bold
             )
-            Spacer(modifier = Modifier.height(4.dp))
+
+            Spacer(Modifier.height(5.dp))
+
             Text(
-                text = "Pessoas que acompanham seu tratamento e recebem alertas sobre suas doses.",
+                text = "Pessoas que acompanham seu tratamento.",
                 color = MedAlertTextSecondary,
                 fontSize = 14.sp
             )
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(Modifier.height(26.dp))
 
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
         ) {
-            when (val state = uiState) {
-                is ResponsiblesUiState.Loading -> LoadingState()
 
-                is ResponsiblesUiState.Error -> ErrorState(
-                    title = state.message,
-                    onRetryClick = { scope.launch { carregar() } }
-                )
+            when {
 
-                is ResponsiblesUiState.Success -> {
-                    if (state.responsaveis.isEmpty()) {
-                        EmptyState(
-                            icon = Icons.Filled.People,
-                            title = "Nenhum responsável cadastrado.",
-                            message = "Adicione alguém de confiança para acompanhar seu tratamento."
+                carregando -> {
+                    CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.Center),
+                        color = MedAlertPrimary
+                    )
+                }
+
+                erro -> {
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+
+                        Text(
+                            "Não foi possível carregar os responsáveis.",
+                            color = MedAlertTextSecondary
                         )
-                    } else {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .verticalScroll(rememberScrollState())
-                                .padding(horizontal = 20.dp)
-                        ) {
-                            state.responsaveis.forEach { responsavel ->
-                                ResponsavelCard(
-                                    responsavel = responsavel,
-                                    onRemoveClick = { responsavelParaRemover = responsavel }
-                                )
-                                Spacer(modifier = Modifier.height(10.dp))
-                            }
 
-                            Spacer(modifier = Modifier.height(4.dp))
+                        TextButton(
+                            onClick = {
+                                scope.launch { carregar() }
+                            }
+                        ) {
                             Text(
-                                text = "Por enquanto o aplicativo não consegue confirmar quando o responsável aceita o convite. Esta lista mostra os convites enviados a partir deste aparelho.",
-                                color = MedAlertTextSecondary,
-                                fontSize = 12.sp
+                                "Tentar novamente",
+                                color = MedAlertPrimary
                             )
-                            Spacer(modifier = Modifier.height(16.dp))
                         }
+                    }
+                }
+
+                responsaveis.isEmpty() -> {
+
+                    EmptyResponsibleState()
+                }
+
+                else -> {
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 20.dp)
+                    ) {
+
+                        Text(
+                            "Seu responsável",
+                            color = MedAlertTextPrimary,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        Spacer(Modifier.height(14.dp))
+
+                        responsaveis.forEach { responsavel ->
+
+                            ResponsibleProfileCard(
+                                responsavel = responsavel,
+                                onRemove = {
+                                    responsavelParaRemover = responsavel
+                                }
+                            )
+
+                            Spacer(Modifier.height(24.dp))
+                        }
+
+                        ResponsibleInformation()
+
+                        Spacer(Modifier.height(20.dp))
                     }
                 }
             }
         }
 
-        // Botão fixo, sempre visível (igual ao padrão das outras telas de formulário). Sem a
-        // confirmação do aceite o paciente nunca fica sem poder convidar de novo.
-        val hasResponsaveis =
-            (uiState as? ResponsiblesUiState.Success)?.responsaveis?.isNotEmpty() == true
+        // Botão inferior
         Button(
             onClick = onAddClick,
             modifier = Modifier
@@ -199,41 +234,70 @@ fun ResponsiblesScreen(
                 contentColor = MedAlertBackground
             )
         ) {
+
             Text(
-                text = if (hasResponsaveis) "Convidar outro responsável" else "Adicionar responsável",
+                text = if (responsaveis.isEmpty()) {
+                    "Adicionar responsável"
+                } else {
+                    "Adicionar outro responsável"
+                },
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold
             )
         }
     }
 
+    // Confirmação de remoção
     responsavelParaRemover?.let { responsavel ->
+
         AlertDialog(
-            onDismissRequest = { responsavelParaRemover = null },
+            onDismissRequest = {
+                responsavelParaRemover = null
+            },
             containerColor = MedAlertCard,
             title = {
-                Text("Remover convite?", color = MedAlertTextPrimary, fontWeight = FontWeight.Bold)
+                Text(
+                    "Remover convite?",
+                    color = MedAlertTextPrimary
+                )
             },
             text = {
                 Text(
-                    "${responsavel.nome} será removido da lista deste aparelho. Isso não desfaz um vínculo que já tenha sido aceito.",
+                    "O registro de ${responsavel.nome} será removido deste aparelho. Isso não desfaz um vínculo já aceito.",
                     color = MedAlertTextSecondary
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    scope.launch {
-                        runCatching { repository.remover(responsavel.id) }
-                        responsavelParaRemover = null
-                        carregar()
+
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            runCatching {
+                                repository.remover(responsavel.id)
+                            }
+
+                            responsavelParaRemover = null
+                            carregar()
+                        }
                     }
-                }) {
-                    Text("Remover", color = MedAlertStatusRed, fontWeight = FontWeight.SemiBold)
+                ) {
+                    Text(
+                        "Remover",
+                        color = MedAlertStatusRed
+                    )
                 }
             },
             dismissButton = {
-                TextButton(onClick = { responsavelParaRemover = null }) {
-                    Text("Cancelar", color = MedAlertTextSecondary)
+
+                TextButton(
+                    onClick = {
+                        responsavelParaRemover = null
+                    }
+                ) {
+                    Text(
+                        "Cancelar",
+                        color = MedAlertTextSecondary
+                    )
                 }
             }
         )
@@ -241,69 +305,273 @@ fun ResponsiblesScreen(
 }
 
 @Composable
-private fun ResponsavelCard(
+private fun ResponsibleProfileCard(
     responsavel: ResponsavelUiModel,
-    onRemoveClick: () -> Unit
+    onRemove: () -> Unit
 ) {
-    // Verde é só para vínculo ativo (confirmado). Convite enviado usa a cor de destaque neutra.
-    val statusColor =
-        if (responsavel.status.equals(STATUS_VINCULO_ATIVO, ignoreCase = true)) MedAlertStatusGreen
-        else MedAlertPrimary
 
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MedAlertCard, shape = RoundedCornerShape(16.dp))
-            .padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .background(
+                MedAlertCard,
+                RoundedCornerShape(22.dp)
+            )
+            .padding(18.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .size(44.dp)
-                .background(MedAlertPrimary.copy(alpha = 0.18f), shape = CircleShape),
-            contentAlignment = Alignment.Center
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically
         ) {
+
+            // Avatar
+            Box(
+                modifier = Modifier
+                    .size(62.dp)
+                    .background(
+                        MedAlertPrimary.copy(alpha = 0.16f),
+                        CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+
+                Text(
+                    text = responsavel.nome
+                        .firstOrNull()
+                        ?.uppercase()
+                        ?: "?",
+                    color = MedAlertPrimary,
+                    fontSize = 27.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Spacer(Modifier.width(14.dp))
+
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+
+                Text(
+                    responsavel.nome,
+                    color = MedAlertTextPrimary,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(Modifier.height(4.dp))
+
+                Text(
+                    responsavel.email,
+                    color = MedAlertTextSecondary,
+                    fontSize = 13.sp
+                )
+            }
+
+            IconButton(onClick = onRemove) {
+
+                Icon(
+                    Icons.Filled.Delete,
+                    contentDescription = "Remover convite",
+                    tint = MedAlertTextSecondary
+                )
+            }
+        }
+
+        Spacer(Modifier.height(18.dp))
+
+        // Status
+        Row(
+            modifier = Modifier
+                .background(
+                    MedAlertPrimary.copy(alpha = 0.12f),
+                    RoundedCornerShape(20.dp)
+                )
+                .padding(
+                    horizontal = 12.dp,
+                    vertical = 7.dp
+                ),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+
+            Icon(
+                Icons.Filled.Check,
+                contentDescription = null,
+                tint = MedAlertPrimary,
+                modifier = Modifier.size(16.dp)
+            )
+
+            Spacer(Modifier.width(6.dp))
+
             Text(
-                text = responsavel.nome.firstOrNull()?.uppercase() ?: "?",
+                text = responsavel.status,
                 color = MedAlertPrimary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        HorizontalDivider(
+            color = MedAlertBackground
+        )
+
+        Spacer(Modifier.height(14.dp))
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+
+            Icon(
+                Icons.Filled.CalendarMonth,
+                contentDescription = null,
+                tint = MedAlertTextSecondary,
+                modifier = Modifier.size(21.dp)
+            )
+
+            Spacer(Modifier.width(12.dp))
+
+            Column {
+
+                Text(
+                    "Data do convite",
+                    color = MedAlertTextSecondary,
+                    fontSize = 12.sp
+                )
+
+                Text(
+                    responsavel.relacao.removePrefix("Enviado em "),
+                    color = MedAlertTextPrimary,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResponsibleInformation() {
+
+    Column {
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+
+            Icon(
+                Icons.Filled.People,
+                contentDescription = null,
+                tint = MedAlertPrimary,
+                modifier = Modifier.size(25.dp)
+            )
+
+            Spacer(Modifier.width(12.dp))
+
+            Text(
+                "Acompanhamento",
+                color = MedAlertTextPrimary,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold
             )
         }
 
-        Spacer(modifier = Modifier.width(12.dp))
+        Spacer(Modifier.height(12.dp))
 
-        Column(modifier = Modifier.weight(1f)) {
-            Text(responsavel.nome, color = MedAlertTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            Text(responsavel.email, color = MedAlertTextSecondary, fontSize = 12.sp)
+        Text(
+            text = "Seu responsável poderá acompanhar informações sobre seus medicamentos e receber notificações após a confirmação do vínculo.",
+            color = MedAlertTextSecondary,
+            fontSize = 14.sp,
+            lineHeight = 22.sp
+        )
 
-            Spacer(modifier = Modifier.height(4.dp))
+        Spacer(Modifier.height(18.dp))
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .background(statusColor.copy(alpha = 0.15f), shape = RoundedCornerShape(8.dp))
-                        .padding(horizontal = 8.dp, vertical = 3.dp)
-                ) {
-                    Text(
-                        text = responsavel.status,
-                        color = statusColor,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(responsavel.relacao, color = MedAlertTextSecondary, fontSize = 11.sp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    MedAlertCard,
+                    RoundedCornerShape(16.dp)
+                )
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+
+            Icon(
+                Icons.Filled.Shield,
+                contentDescription = null,
+                tint = MedAlertPrimary,
+                modifier = Modifier.size(24.dp)
+            )
+
+            Spacer(Modifier.width(12.dp))
+
+            Column {
+
+                Text(
+                    "Sua privacidade importa",
+                    color = MedAlertTextPrimary,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp
+                )
+
+                Text(
+                    "O acompanhamento depende da confirmação do convite.",
+                    color = MedAlertTextSecondary,
+                    fontSize = 12.sp
+                )
             }
         }
+    }
+}
 
-        IconButton(onClick = onRemoveClick) {
+@Composable
+private fun EmptyResponsibleState() {
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 35.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+
+        Box(
+            modifier = Modifier
+                .size(100.dp)
+                .background(
+                    MedAlertCard,
+                    CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+
             Icon(
-                imageVector = Icons.Filled.Delete,
-                contentDescription = "Remover convite",
-                tint = MedAlertTextSecondary,
-                modifier = Modifier.size(20.dp)
+                Icons.Filled.People,
+                contentDescription = null,
+                tint = MedAlertPrimary,
+                modifier = Modifier.size(44.dp)
             )
         }
+
+        Spacer(Modifier.height(24.dp))
+
+        Text(
+            "Tenha alguém acompanhando você.",
+            color = MedAlertTextPrimary,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(Modifier.height(10.dp))
+
+        Text(
+            "Adicione uma pessoa de confiança para convidá-la a acompanhar seu tratamento.",
+            color = MedAlertTextSecondary,
+            fontSize = 14.sp,
+            lineHeight = 21.sp
+        )
     }
 }

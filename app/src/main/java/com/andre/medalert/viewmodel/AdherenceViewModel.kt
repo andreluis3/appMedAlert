@@ -33,8 +33,8 @@ import java.io.IOException
  * adesão de um paciente nunca aparece (nem é gravada no estado) depois que a sessão passou a
  * outro paciente.
  *
- * Logs (tag AdherenceVM): só perfil, id do paciente consultado, contadores e códigos HTTP.
- * Nunca token, e-mail ou nome.
+ * Logs (tag AdherenceVM): só perfil, ids, contadores e códigos HTTP.
+ * Nunca token, e-mail ou nome. A URL e o código HTTP da chamada aparecem no log do OkHttp.
  */
 class AdherenceViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -85,7 +85,12 @@ class AdherenceViewModel(application: Application) : AndroidViewModel(applicatio
         }
 
         val perfil = if (identity.isCaregiver) "cuidador" else "paciente"
-        AppLog.d(TAG, "consultando dashboard: perfil=$perfil, usuarioId enviado=$patientId")
+        // Mesma linha para os dois perfis: permite comparar o id enviado ao dashboard.
+        AppLog.d(
+            TAG,
+            "perfil=$perfil, usuarioId=${identity.userId}, pacienteId=$patientId, " +
+                    "dashboardId=$patientId (GET api/historys/dashboard/$patientId)"
+        )
 
         // Nunca mostra a adesão do paciente anterior enquanto a nova carrega.
         _uiState.value = AdherenceUiState.Loading
@@ -96,7 +101,9 @@ class AdherenceViewModel(application: Application) : AndroidViewModel(applicatio
                 TAG,
                 "dashboard recebido: perfil=$perfil, id=$patientId, adesao='${remote.adesao}', " +
                         "dosesEsp=${remote.dosesEsp}, dosesTom=${remote.dosesTom}, " +
-                        "dosesAtr=${remote.dosesAtr}, dosesNT=${remote.dosesNT}"
+                        "dosesAtr=${remote.dosesAtr}, dosesNT=${remote.dosesNT}, " +
+                        "adesaoD=${remote.adesaoD.size}, adesaoR=${remote.adesaoR.size}, " +
+                        "horariosEsq=${remote.horariosEsq.size}"
             )
 
             val problem = remote.validationProblem()
@@ -108,9 +115,24 @@ class AdherenceViewModel(application: Application) : AndroidViewModel(applicatio
                 }
 
                 // Servidor sem dados ainda: se o aparelho já tem como calcular, mostra o local.
-                remote.dosesEsp == 0 ->
-                    localOrNull(patientId)?.let { AdherenceUiState.Success(it, isLocal = true) }
-                        ?: AdherenceUiState.Success(remote)
+                remote.dosesEsp == 0 -> {
+                    val local = localOrNull(patientId)
+                    if (local != null) {
+                        AppLog.w(
+                            TAG,
+                            "servidor devolveu dosesEsp=0 para id=$patientId; exibindo cálculo " +
+                                    "LOCAL do aparelho (perfil=$perfil, dosesEsp local=${local.dosesEsp})"
+                        )
+                        AdherenceUiState.Success(local, isLocal = true)
+                    } else {
+                        AppLog.w(
+                            TAG,
+                            "servidor devolveu dosesEsp=0 para id=$patientId e não há cálculo " +
+                                    "local neste aparelho (perfil=$perfil)"
+                        )
+                        AdherenceUiState.Success(remote)
+                    }
+                }
 
                 else -> {
                     // Diagnóstico: servidor diz 0 tomadas. Há doses tomadas aqui ainda não enviadas?
