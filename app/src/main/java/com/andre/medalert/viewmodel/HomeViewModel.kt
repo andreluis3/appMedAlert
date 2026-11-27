@@ -21,6 +21,9 @@ import com.andre.medalert.data.session.LinkState
 import com.andre.medalert.data.session.PatientContextProvider
 import com.andre.medalert.data.schedule.SessionUser
 import com.andre.medalert.data.session.AccessPolicy
+import com.andre.medalert.data.session.identity
+import com.andre.medalert.data.session.AdherenceRouting
+import com.andre.medalert.data.session.AdherenceRoute
 import com.andre.medalert.notification.DoseIntakeRegistrar
 import com.andre.medalert.notification.DoseRegisterResult
 import com.andre.medalert.notification.NotificationHelper
@@ -249,6 +252,18 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     init {
+        // DIAGNÓSTICO TEMPORÁRIO (só debug): relatório "MEDDIAG" no Logcat comparando Home e Remédios.
+        if (com.andre.medalert.BuildConfig.DEBUG) {
+            viewModelScope.launch {
+                SessionMedications.observe(application)
+                    .distinctUntilChanged()
+                    .collectLatest { medications ->
+                        com.andre.medalert.data.schedule.MedicationDiagnosticsLogger
+                            .log(application, medications)
+                    }
+            }
+        }
+
         // Reage à sessão: quando o cuidador aceita o vínculo o paciente_id muda e a Home carrega
         // os dados do paciente sem recriar o ViewModel nem pedir novo login.
         // Offline-first: se falhar, a Home continua com o que já está no Room.
@@ -301,7 +316,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      */
     private suspend fun loadAdherenceLabel(patientId: Int): String? {
         val dashboard: DashboardResponse = try {
-            historyRepository.getDashboard(patientId)
+            // Paciente -> dashboard/{usuarioId}; cuidador vinculado -> dashboard/cuid/{pacienteId}.
+            // Se o vínculo mudou desde que este paciente foi pedido, não consulta (nem mistura).
+            val route = AdherenceRouting.route(prefs.session.first().identity())
+            if (route !is AdherenceRoute.Remote || route.patientId != patientId) {
+                AppLog.d(TAG, "adesão: sessão não aponta mais para o paciente $patientId; sem consulta")
+                return NO_ADHERENCE_DATA
+            }
+            historyRepository.getDashboard(route)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

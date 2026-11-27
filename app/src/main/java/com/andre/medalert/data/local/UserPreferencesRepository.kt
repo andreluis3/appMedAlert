@@ -16,6 +16,7 @@ import com.andre.medalert.data.session.AccessPolicy
 import com.andre.medalert.data.session.LinkedPatientProfile
 import com.andre.medalert.data.session.SessionInfo
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 private val Context.userDataStore: DataStore<Preferences> by preferencesDataStore(name = "user_prefs")
@@ -275,6 +276,20 @@ class UserPreferencesRepository(context: Context) {
     // ---------------------------------------------------------------------------
 
     /** Paciente cujos dados sincronizados estão em cache no Room (null = nenhum). */
+    // ---- Sincronização de medicamentos: estado da quarentena de ausências (SyncAbsencePolicy) ----
+
+    private fun syncAbsenceKey(userId: Int) = stringPreferencesKey("sync_absence_$userId")
+
+    suspend fun syncAbsenceRaw(userId: Int): String? =
+        dataStore.data.first()[syncAbsenceKey(userId)]
+
+    suspend fun saveSyncAbsenceRaw(userId: Int, raw: String) {
+        dataStore.edit { prefs ->
+            val key = syncAbsenceKey(userId)
+            if (raw.isBlank()) prefs.remove(key) else prefs[key] = raw
+        }
+    }
+
     val localDataOwner: Flow<Int?> = dataStore.data.map { it[Keys.LOCAL_DATA_OWNER] }
 
     /** Registra (ou, com null, esquece) de quem são os dados em cache. Não faz parte da sessão. */

@@ -8,6 +8,7 @@ import com.andre.medalert.data.remote.ApiService
 import com.andre.medalert.data.remote.RetrofitClient
 import com.andre.medalert.data.remote.SessionManager
 import com.andre.medalert.data.remote.dto.DashboardResponse
+import com.andre.medalert.data.session.AdherenceRoute
 import com.andre.medalert.data.remote.dto.DoseTakenRequest
 import com.andre.medalert.data.remote.dto.DoseTakenRequestFactory
 import com.andre.medalert.data.remote.dto.HistoryRecordDto
@@ -157,10 +158,34 @@ class HistoryRepository(
         return inserted
     }
 
-    /** Dashboard continua direto da API (ainda não é guardado no Room). */
-    suspend fun getDashboard(userId: Int): DashboardResponse {
+    /**
+     * Dashboard do PACIENTE: GET api/historys/dashboard/{usuarioId}, com o id do próprio paciente.
+     * Só para o paciente logado; o cuidador usa [getCaregiverDashboard].
+     */
+    suspend fun getPatientDashboard(userId: Int): DashboardResponse {
         return api.getDashboard(userId)
     }
+
+    /**
+     * Dashboard do paciente vinculado, para o CUIDADOR: GET api/historys/dashboard/cuid/{cuidadorId}.
+     * [caregiverId] é o id do CUIDADOR logado (identity.userId), NUNCA o do paciente.
+     */
+    suspend fun getCaregiverDashboard(caregiverId: Int): DashboardResponse {
+        return api.getDashboardCuidador(caregiverId)
+    }
+
+    /**
+     * Escolhe o endpoint pela rota da sessão (ver [AdherenceRouting]): paciente com o id do
+     * paciente, cuidador com o id do cuidador. Direto da API; não vai ao Room.
+     */
+    suspend fun getDashboard(route: AdherenceRoute.Remote): DashboardResponse =
+        when (route) {
+            is AdherenceRoute.Patient -> getPatientDashboard(route.patientId)
+            is AdherenceRoute.Caregiver -> getCaregiverDashboard(route.caregiverId)
+        }
+
+    /** Mantido por compatibilidade: é SEMPRE o dashboard do PACIENTE. O cuidador não deve usar. */
+    suspend fun getDashboard(userId: Int): DashboardResponse = getPatientDashboard(userId)
 
     /**
      * Registra no Room uma dose tomada pela notificação ou pela Home. `inserted = false` no

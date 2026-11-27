@@ -65,7 +65,7 @@ object AdherenceCalculator {
         zone: ZoneId = ZoneId.systemDefault()
     ): AdherenceStats {
         val windowStart = now.minusDays(windowDays.toLong())
-        val takenByDose = taken.associateBy { it.medicationLocalId to it.scheduledAtMillis }
+        val takenByMedication = taken.groupBy { it.medicationLocalId }
 
         var expected = 0
         var onTime = 0
@@ -85,27 +85,33 @@ object AdherenceCalculator {
             var medExpected = 0
             var medTaken = 0
 
-            DoseScheduleCalculator
-                .dosesBetween(listOf(med), since, now.plusNanos(1))
-                .forEach { dose ->
-                    medExpected++
-                    val scheduledMillis = dose.at.atZone(zone).toInstant().toEpochMilli()
-                    val record = takenByDose[med.id to scheduledMillis]
-                    val day = dose.at.dayOfWeek
-                    val (dayExpected, dayTaken) = perDay[day] ?: (0 to 0)
+            val doses = DoseScheduleCalculator.dosesBetween(listOf(med), since, now.plusNanos(1))
+            // Casamento tolerante (ver DoseMatcher): hora/fuso levemente diferentes não viram "não tomada".
+            val matched = DoseMatcher.match(
+                scheduledMillis = doses.map { it.at.atZone(zone).toInstant().toEpochMilli() },
+                records = takenByMedication[med.id].orEmpty()
+            )
 
-                    if (record == null) {
-                        missed++
-                        val hhmm = "%02d:%02d".format(dose.at.hour, dose.at.minute)
-                        missedTimes[hhmm] = (missedTimes[hhmm] ?: 0) + 1
-                        perDay[day] = (dayExpected + 1) to dayTaken
-                    } else {
-                        medTaken++
-                        val delayMinutes = (record.takenAtMillis - scheduledMillis) / 60_000
-                        if (delayMinutes > LATE_AFTER_MINUTES) late++ else onTime++
-                        perDay[day] = (dayExpected + 1) to (dayTaken + 1)
-                    }
+            doses.forEach { dose ->
+                medExpected++
+                val scheduledMillis = dose.at.atZone(zone).toInstant().toEpochMilli()
+                val record = matched[scheduledMillis]
+                val day = dose.at.dayOfWeek
+                val (dayExpected, dayTaken) = perDay[day] ?: (0 to 0)
+
+                if (record == null) {
+                    missed++
+                    val hhmm = "%02d:%02d".format(dose.at.hour, dose.at.minute)
+                    missedTimes[hhmm] = (missedTimes[hhmm] ?: 0) + 1
+                    perDay[day] = (dayExpected + 1) to dayTaken
+                } else {
+                    medTaken++
+                    // O atraso é medido contra o horário que o REGISTRO guardou como previsto.
+                    val delayMinutes = (record.takenAtMillis - record.scheduledAtMillis) / 60_000
+                    if (delayMinutes > LATE_AFTER_MINUTES) late++ else onTime++
+                    perDay[day] = (dayExpected + 1) to (dayTaken + 1)
                 }
+            }
 
             expected += medExpected
             if (medExpected > 0) perMed += MedicationAdherence(med.nome, medExpected, medTaken)

@@ -16,6 +16,7 @@ import com.andre.medalert.data.remote.dto.MedicamentoResponse
 import com.andre.medalert.data.session.AccessPolicy
 import com.andre.medalert.data.session.SessionInfo
 import com.andre.medalert.notification.NotificationRecorder
+import com.andre.medalert.BuildConfig
 import com.andre.medalert.util.AppLog
 import com.google.gson.Gson
 import com.google.gson.JsonParser
@@ -124,7 +125,9 @@ class MedicationRepository(
     private val sessionProvider: suspend () -> SessionInfo,
     private val api: ApiService = RetrofitClient.instance,
     /** Guarda o nome do paciente vinculado (cuidador). No-op por padrão (testes). */
-    private val savePatientName: suspend (patientId: Int, name: String) -> Unit = { _, _ -> }
+    private val savePatientName: suspend (patientId: Int, name: String) -> Unit = { _, _ -> },
+    /** Estado da quarentena de ausências (SyncAbsencePolicy). Em memória por padrão (testes). */
+    private val absenceStorage: SyncAbsenceStorage = SyncAbsenceStorage.InMemory()
 ) {
 
     constructor(
@@ -135,7 +138,8 @@ class MedicationRepository(
         dao,
         { userPrefs.session.first() },
         api,
-        { patientId, name -> userPrefs.saveLinkedPatientName(patientId, name) }
+        { patientId, name -> userPrefs.saveLinkedPatientName(patientId, name) },
+        PreferencesSyncAbsenceStorage(userPrefs)
     )
 
     /** O que o usuário quer fazer com um medicamento (cada ação tem a sua permissão). */
@@ -230,7 +234,40 @@ class MedicationRepository(
                     if (mutationEpoch.get() != epochAntes) {
                         false
                     } else {
-                        dao.replaceSynced(patientId, entitiesFrom(snapshot, patientId))
+                        if (BuildConfig.DEBUG) logRemoteSnapshot(snapshot, patientId)
+                        val entities = entitiesFrom(snapshot, patientId)
+
+                        // O que sumiu da resposta entra em quarentena e só é apagado se continuar
+                        // ausente (ver SyncAbsencePolicy). Falha ao ler/gravar o estado nunca
+                        // apaga nada: sem estado, a contagem recomeça.
+                        val decision = SyncAbsencePolicy.decide(
+                            existingRemoteIds = dao.getSyncedByUser(patientId).mapNotNull { it.remoteId },
+                            incomingRemoteIds = entities.mapNotNull { it.remoteId }.toSet(),
+                            previous = try {
+                                absenceStorage.load(patientId)
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                emptyMap()
+                            },
+                            nowMillis = System.currentTimeMillis()
+                        )
+                        if (BuildConfig.DEBUG) {
+                            AppLog.d(
+                                "MEDDIAG",
+                                "ausentes em quarentena=${decision.nextState.size}, " +
+                                        "ausência confirmada (apagáveis)=${decision.confirmedAbsentRemoteIds.size}"
+                            )
+                        }
+
+                        dao.replaceSynced(patientId, entities, decision.confirmedAbsentRemoteIds)
+                        try {
+                            absenceStorage.save(patientId, decision.nextState)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            AppLog.w(TAG, "Não foi possível guardar o estado de ausências", e)
+                        }
                         true
                     }
                 }
@@ -250,6 +287,32 @@ class MedicationRepository(
         } catch (e: Exception) {
             AppLog.w(TAG, "Falha ao atualizar a lista", e)
             Result.failure(e)
+        }
+    }
+
+    /**
+     * DIAGNÓSTICO TEMPORÁRIO (só debug, tag MEDDIAG): o que a API trouxe x o que o Room já tem.
+     * Não loga nome, token nem observações; só contagens de campos presentes.
+     */
+    private suspend fun logRemoteSnapshot(snapshot: RemoteSnapshot, patientId: Int) {
+        val meds = snapshot.medications
+        val noRoom = dao.getSyncedByUser(patientId).size
+        AppLog.d(
+            "MEDDIAG",
+            "refresh paciente=$patientId | API trouxe ${meds.size} | Room sincronizados=$noRoom | " +
+                    "com data_inicio=${meds.count { !it.dataInicio.isNullOrBlank() }} " +
+                    "data_fim=${meds.count { !it.dataFim.isNullOrBlank() }} " +
+                    "frequencia=${meds.count { it.frequencia != null }} " +
+                    "horario_dose=${meds.count { !it.horarioDose.isNullOrBlank() }} " +
+                    "doseDiaria=${meds.count { !it.doseDiaria.isNullOrEmpty() }} | " +
+                    "ativo=false em ${meds.count { it.ativo == false }}, ausente em ${meds.count { it.ativo == null }}"
+        )
+        if (meds.isEmpty() && noRoom > 0) {
+            AppLog.w(
+                "MEDDIAG",
+                "API devolveu lista VAZIA com $noRoom medicamentos sincronizados no Room: " +
+                        "nada é apagado agora (quarentena de ausências)"
+            )
         }
     }
 

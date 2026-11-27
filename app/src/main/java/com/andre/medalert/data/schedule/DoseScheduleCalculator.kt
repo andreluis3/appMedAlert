@@ -32,10 +32,16 @@ fun YearMonth.labelPtBr(): String =
  * data de início, horário da primeira dose, frequência (horas), data de fim e status ativo.
  *
  * Regras:
- * - Inativo, sem data de início ou sem horário -> nenhuma dose (nada é inventado).
- * - Com frequência: dose n = início + n * frequência (horas).
- * - Sem frequência, mas com a lista "horarios": esses horários se repetem todos os dias.
- * - Nada antes do início e nada depois do fim (o dia da data de fim entra inteiro).
+ * - Inativo, ou sem nenhum horário utilizável -> nenhuma dose (nada é inventado).
+ * - Com data de início válida e frequência: dose n = início + n * frequência (horas).
+ * - Com data de início válida e sem frequência, mas com a lista "horarios": esses horários se
+ *   repetem todos os dias a partir do início.
+ * - SEM data de início utilizável (ausente ou em formato inválido): os horários vêm da regra do
+ *   próprio servidor ([ServerDoseRule] a partir de horarioDose + frequencia, ou a lista
+ *   "horarios") e se repetem todos os dias, sem limite de início. A data de início nunca é
+ *   inventada, e a adesão local continua limitada por acompanhadoDesde. É a mesma regra que o
+ *   cuidador já usa ([CaregiverDoseSchedule]).
+ * - Nada depois do fim, quando a data de fim é válida (o dia da data de fim entra inteiro).
  */
 object DoseScheduleCalculator {
 
@@ -86,23 +92,90 @@ object DoseScheduleCalculator {
         return null
     }
 
-    private fun plan(med: MedicationEntity): Plan? {
-        if (!med.ativo) return null
-        val startDate = parseDate(med.dataInicio) ?: return null
-        val endExclusive = parseDate(med.dataFim)?.plusDays(1)?.atStartOfDay()
+    /** Como o cálculo trata um medicamento. Mesma decisão usada por [plan] e pelo diagnóstico. */
+    data class PlanDiagnosis(
+        /** SERIE, HORARIOS_DIARIOS, REGRA_DO_SERVIDOR (sem data de início) ou NENHUM. */
+        val plano: String,
+        /** Por que NÃO há plano (só quando [plano] = NENHUM). */
+        val motivo: String?,
+        /** Dados ausentes/inválidos que o cálculo encontrou, mesmo quando ainda gera doses. */
+        val observacoes: List<String>
+    )
+
+    const val PLANO_SERIE = "SERIE"
+    const val PLANO_HORARIOS_DIARIOS = "HORARIOS_DIARIOS"
+    const val PLANO_REGRA_DO_SERVIDOR = "REGRA_DO_SERVIDOR"
+    const val PLANO_NENHUM = "NENHUM"
+
+    /** Início "sem limite": usado só quando o medicamento não tem data de início utilizável. */
+    private val SEM_INICIO: LocalDateTime = LocalDateTime.of(1970, 1, 1, 0, 0)
+
+    private class Resolution(val plan: Plan?, val diagnosis: PlanDiagnosis)
+
+    private fun none(motivo: String, notas: List<String>) =
+        Resolution(null, PlanDiagnosis(PLANO_NENHUM, motivo, notas))
+
+    private fun resolve(med: MedicationEntity): Resolution {
+        if (!med.ativo) return none("medicamento inativo (ativo = false)", emptyList())
+
+        val notas = mutableListOf<String>()
+
+        val inicioTexto = med.dataInicio
+        val startDate = parseDate(inicioTexto)
+        when {
+            inicioTexto.isNullOrBlank() -> notas += "dataInicio ausente"
+            startDate == null -> notas += "dataInicio inválida (formato não reconhecido)"
+        }
+
+        val endDate = parseDate(med.dataFim)
+        if (!med.dataFim.isNullOrBlank() && endDate == null) notas += "dataFim inválida (ignorada)"
+        val endExclusive = endDate?.plusDays(1)?.atStartOfDay()
 
         val first = firstTime(med)
-        val freq = med.frequencia
-        if (freq != null && freq in 1..24 && first != null) {
-            return SeriesPlan(startDate.atTime(first), endExclusive, freq * 3600L)
-        }
+        if (first == null) notas += "horarioDose ausente ou inválido"
+
+        val freqBruta = med.frequencia
+        val freq = freqBruta?.takeIf { it in 1..24 }
+        if (freqBruta == null) notas += "frequência ausente"
+        else if (freq == null) notas += "frequência $freqBruta fora de 1..24"
 
         val daily = med.horariosLista().mapNotNull { parseTime(it) }.distinct().sorted()
-        if (daily.isNotEmpty()) {
-            return DailyPlan(startDate.atStartOfDay(), endExclusive, daily)
+
+        if (startDate != null) {
+            if (freq != null && first != null) {
+                return Resolution(
+                    SeriesPlan(startDate.atTime(first), endExclusive, freq * 3600L),
+                    PlanDiagnosis(PLANO_SERIE, null, notas)
+                )
+            }
+            if (daily.isNotEmpty()) {
+                return Resolution(
+                    DailyPlan(startDate.atStartOfDay(), endExclusive, daily),
+                    PlanDiagnosis(PLANO_HORARIOS_DIARIOS, null, notas)
+                )
+            }
+            return none("sem horário da primeira dose + frequência válida e sem lista de horários", notas)
         }
-        return null
+
+        // Sem data de início utilizável: regra do servidor, sem limite de início.
+        val times = if (freq != null && first != null) {
+            ServerDoseRule.timesOfDay("%02d:%02d".format(first.hour, first.minute), freq)
+        } else {
+            daily
+        }
+        if (times.isNotEmpty()) {
+            return Resolution(
+                DailyPlan(SEM_INICIO, endExclusive, times),
+                PlanDiagnosis(PLANO_REGRA_DO_SERVIDOR, null, notas)
+            )
+        }
+        return none("sem data de início e sem horário utilizável (horarioDose + frequência ou lista de horários)", notas)
     }
+
+    private fun plan(med: MedicationEntity): Plan? = resolve(med).plan
+
+    /** Explica, sem calcular doses, qual plano o medicamento recebe (ou por que não recebe nenhum). */
+    fun diagnose(med: MedicationEntity): PlanDiagnosis = resolve(med).diagnosis
 
     // ------------------------------------------------------------- consultas
 

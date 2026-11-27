@@ -30,7 +30,11 @@ object LocalAdherence {
         val fromMillis = now.minusDays(AdherenceCalculator.DEFAULT_WINDOW_DAYS.toLong())
             .atZone(zone).toInstant().toEpochMilli()
 
-        val medications = SessionMedications.observe(app).first()
+        // Medicamentos do MESMO paciente cujo histórico está sendo lido (e não "o da sessão":
+        // se a sessão trocar entre as duas leituras, as listas não podem ser de pacientes diferentes).
+        val medications = AppDatabase.getInstance(app).medicationDao()
+            .observeByUser(patientId).first()
+            .filter { it.userId == patientId }
         val taken = AppDatabase.getInstance(app).doseHistoryDao()
             .observeLocalTaken(patientId, fromMillis).first()
             .mapNotNull {

@@ -10,6 +10,12 @@ import com.andre.medalert.data.local.entity.MedicationEntity
 import com.andre.medalert.data.local.entity.preservingDetailsFrom
 import kotlinx.coroutines.flow.Flow
 
+/** Resultado de [MedicationDao.countByUser]. Os nomes das propriedades são os das colunas. */
+data class MedicationUserCount(
+    val userId: Int,
+    val total: Int
+)
+
 /**
  * Toda escrita/exclusão que age sobre UMA linha por id tem uma versão "ForUser" que exige que a
  * linha pertença ao paciente informado. As versões sem dono continuam existindo por
@@ -102,6 +108,16 @@ abstract class MedicationDao {
     abstract suspend fun getSyncedByUser(
         userId: Int
     ): List<MedicationEntity>
+
+    /** Todas as linhas do paciente (sincronizadas ou não). Usado só pelo diagnóstico. */
+    @Query("SELECT * FROM medications WHERE userId = :userId ORDER BY nome COLLATE NOCASE")
+    abstract suspend fun getAllByUser(
+        userId: Int
+    ): List<MedicationEntity>
+
+    /** Quantas linhas existem por userId (todos os usuários). Usado só pelo diagnóstico. */
+    @Query("SELECT userId AS userId, COUNT(*) AS total FROM medications GROUP BY userId")
+    abstract suspend fun countByUser(): List<MedicationUserCount>
 
     @Insert
     abstract suspend fun insert(
@@ -370,14 +386,17 @@ abstract class MedicationDao {
      * - Mesmo remoteId: mantém o ID local e preserva detalhes existentes.
      * - Novo remoteId: insere um novo registro.
      * - remoteId repetido dentro da MESMA resposta: só o primeiro entra (evita linhas duplicadas).
-     * - Medicamento ausente na API: remove o registro sincronizado.
+     * - Medicamento ausente na API: NÃO é apagado só por isso. Sai apenas se o remoteId estiver em
+     *   [confirmedAbsentRemoteIds] (ausência confirmada por SyncAbsencePolicy). Resposta vazia ou
+     *   parcial só abre a quarentena. Sobras duplicadas de um remoteId que a API devolveu são limpas.
      * - Medicamentos criados offline (isSynced = 0): não são alterados.
      * - Toda exclusão e marcação de histórico fica limitada ao paciente [userId].
      */
     @Transaction
     open suspend fun replaceSynced(
         userId: Int,
-        entities: List<MedicationEntity>
+        entities: List<MedicationEntity>,
+        confirmedAbsentRemoteIds: Set<Int>
     ) {
 
         val existing = getSyncedByUser(userId)
@@ -402,9 +421,13 @@ abstract class MedicationDao {
             .filter { it != 0L }
             .toSet()
 
-        val toDelete = existing
-            .map { it.id }
-            .filter { it !in keepIds }
+        // Só apaga o que a ReplaceSyncedRules permite (ver SyncAbsencePolicy).
+        val toDelete = ReplaceSyncedRules.idsToDelete(
+            existing = existing.map { ReplaceSyncedRules.ExistingRow(it.id, it.remoteId) },
+            keepIds = keepIds,
+            incomingRemoteIds = unique.mapNotNull { it.remoteId }.toSet(),
+            confirmedAbsentRemoteIds = confirmedAbsentRemoteIds
+        )
 
         if (toDelete.isNotEmpty()) {
             // Sumiu da API (excluído em outro aparelho, por exemplo): o histórico local fica.

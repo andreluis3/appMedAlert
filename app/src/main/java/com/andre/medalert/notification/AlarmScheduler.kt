@@ -68,6 +68,19 @@ object AlarmScheduler {
         setAlarm(context, triggerAtMillis, snoozeRequestCodeFor(medicationLocalId), intent)
     }
 
+    /**
+     * true se há um alarme registrado para a próxima dose deste medicamento. Só leitura: usa
+     * FLAG_NO_CREATE, então não cria nada. [cancel] também cancela o PendingIntent, então
+     * "existe" quer dizer "o alarme está agendado". Usado no diagnóstico (Logcat, tag MEDDIAG).
+     */
+    fun isScheduled(context: Context, medicationLocalId: Long): Boolean =
+        PendingIntent.getBroadcast(
+            context,
+            requestCodeFor(medicationLocalId),
+            Intent(context, MedicationAlarmReceiver::class.java),
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+        ) != null
+
     fun cancel(context: Context, medicationLocalId: Long) {
         cancelByRequestCode(context, requestCodeFor(medicationLocalId))
     }

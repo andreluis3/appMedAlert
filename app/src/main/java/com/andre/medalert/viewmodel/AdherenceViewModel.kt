@@ -11,6 +11,8 @@ import com.andre.medalert.data.remote.dto.validationProblem
 import com.andre.medalert.data.repository.HistoryRepository
 import com.andre.medalert.data.schedule.LocalAdherence
 import com.andre.medalert.data.schedule.toDashboardResponse
+import com.andre.medalert.data.session.AdherenceRoute
+import com.andre.medalert.data.session.AdherenceRouting
 import com.andre.medalert.data.session.SessionIdentity
 import com.andre.medalert.data.session.identity
 import com.andre.medalert.state.AdherenceUiState
@@ -29,9 +31,14 @@ import java.io.IOException
 
 /**
  * A sessão é OBSERVADA, não lida uma vez: login, logout e troca de vínculo recarregam a adesão
- * do paciente certo, e a requisição do paciente anterior é cancelada (collectLatest). Assim a
- * adesão de um paciente nunca aparece (nem é gravada no estado) depois que a sessão passou a
- * outro paciente.
+ * do paciente certo, e a requisição anterior é cancelada (collectLatest). Assim a adesão de um
+ * paciente nunca aparece (nem é gravada no estado) depois que a sessão passou a outro paciente.
+ *
+ * Qual endpoint usar vem de [AdherenceRouting]:
+ * - paciente: GET api/historys/dashboard/{id do próprio paciente};
+ * - cuidador com vínculo confirmado: GET api/historys/dashboard/cuid/{id do CUIDADOR}
+ *   (identity.userId; o pacienteId nunca vai na URL);
+ * - cuidador sem vínculo / sem sessão / vínculo inconsistente: nenhuma consulta.
  *
  * Logs (tag AdherenceVM): só perfil, ids, contadores e códigos HTTP.
  * Nunca token, e-mail ou nome. A URL e o código HTTP da chamada aparecem no log do OkHttp.
@@ -65,41 +72,46 @@ class AdherenceViewModel(application: Application) : AndroidViewModel(applicatio
 
     /** Carrega a adesão de UMA identidade; é cancelada inteira quando a identidade muda. */
     private suspend fun loadFor(identity: SessionIdentity) {
-        val patientId = identity.patientId
-        if (patientId == null) {
-            AppLog.d(
-                TAG,
-                if (identity.awaitingLink) {
-                    "cuidador sem vínculo: nenhuma consulta de adesão"
-                } else {
-                    "sem sessão válida: nenhuma consulta de adesão"
-                }
-            )
-            _uiState.value =
-                if (identity.awaitingLink) {
-                    AdherenceUiState.AwaitingLink
-                } else {
-                    AdherenceUiState.Error("Sessão expirada. Entre novamente.")
-                }
-            return
-        }
+        when (val route = AdherenceRouting.route(identity)) {
+            is AdherenceRoute.Remote -> loadRemote(identity, route)
 
-        val perfil = if (identity.isCaregiver) "cuidador" else "paciente"
+            AdherenceRoute.AwaitingLink -> {
+                AppLog.d(TAG, "cuidador sem vínculo: nenhuma consulta de adesão")
+                _uiState.value = AdherenceUiState.AwaitingLink
+            }
+
+            AdherenceRoute.InvalidLink -> {
+                AppLog.w(TAG, "cuidador com vínculo inconsistente (paciente = cuidador): nenhuma consulta")
+                _uiState.value = AdherenceUiState.Error("Vínculo com o paciente inválido. Entre novamente.")
+            }
+
+            AdherenceRoute.NoSession -> {
+                AppLog.d(TAG, "sem sessão válida: nenhuma consulta de adesão")
+                _uiState.value = AdherenceUiState.Error("Sessão expirada. Entre novamente.")
+            }
+        }
+    }
+
+    private suspend fun loadRemote(identity: SessionIdentity, route: AdherenceRoute.Remote) {
+        val patientId = route.patientId
+        val isCaregiver = route is AdherenceRoute.Caregiver
+        val perfil = if (isCaregiver) "cuidador" else "paciente"
+
         // Mesma linha para os dois perfis: permite comparar o id enviado ao dashboard.
         AppLog.d(
             TAG,
             "perfil=$perfil, usuarioId=${identity.userId}, pacienteId=$patientId, " +
-                    "dashboardId=$patientId (GET api/historys/dashboard/$patientId)"
+                    "dashboardId=${route.requestId} (GET ${route.path})"
         )
 
         // Nunca mostra a adesão do paciente anterior enquanto a nova carrega.
         _uiState.value = AdherenceUiState.Loading
 
         _uiState.value = try {
-            val remote = repository.getDashboard(patientId)
+            val remote = repository.getDashboard(route)
             AppLog.d(
                 TAG,
-                "dashboard recebido: perfil=$perfil, id=$patientId, adesao='${remote.adesao}', " +
+                "dashboard recebido: perfil=$perfil, id=${route.requestId}, adesao='${remote.adesao}', " +
                         "dosesEsp=${remote.dosesEsp}, dosesTom=${remote.dosesTom}, " +
                         "dosesAtr=${remote.dosesAtr}, dosesNT=${remote.dosesNT}, " +
                         "adesaoD=${remote.adesaoD.size}, adesaoR=${remote.adesaoR.size}, " +
@@ -110,7 +122,10 @@ class AdherenceViewModel(application: Application) : AndroidViewModel(applicatio
             when {
                 // Resposta malformada: não vira "0%" nem é trocada pelo Room em silêncio.
                 problem != null -> {
-                    AppLog.w(TAG, "resposta do dashboard inválida ($problem): perfil=$perfil, id=$patientId")
+                    AppLog.w(
+                        TAG,
+                        "resposta do dashboard inválida ($problem): perfil=$perfil, id=${route.requestId}"
+                    )
                     AdherenceUiState.Error(INVALID_RESPONSE_MESSAGE)
                 }
 
@@ -120,14 +135,14 @@ class AdherenceViewModel(application: Application) : AndroidViewModel(applicatio
                     if (local != null) {
                         AppLog.w(
                             TAG,
-                            "servidor devolveu dosesEsp=0 para id=$patientId; exibindo cálculo " +
+                            "servidor devolveu dosesEsp=0 para id=${route.requestId}; exibindo cálculo " +
                                     "LOCAL do aparelho (perfil=$perfil, dosesEsp local=${local.dosesEsp})"
                         )
                         AdherenceUiState.Success(local, isLocal = true)
                     } else {
                         AppLog.w(
                             TAG,
-                            "servidor devolveu dosesEsp=0 para id=$patientId e não há cálculo " +
+                            "servidor devolveu dosesEsp=0 para id=${route.requestId} e não há cálculo " +
                                     "local neste aparelho (perfil=$perfil)"
                         )
                         AdherenceUiState.Success(remote)
@@ -136,7 +151,7 @@ class AdherenceViewModel(application: Application) : AndroidViewModel(applicatio
 
                 else -> {
                     // Diagnóstico: servidor diz 0 tomadas. Há doses tomadas aqui ainda não enviadas?
-                    if (!identity.isCaregiver && remote.dosesTom == 0) logPendingDoses(patientId)
+                    if (!isCaregiver && remote.dosesTom == 0) logPendingDoses(patientId)
                     AdherenceUiState.Success(remote.withLocalForgottenTimes())
                 }
             }
@@ -144,7 +159,10 @@ class AdherenceViewModel(application: Application) : AndroidViewModel(applicatio
             throw e
         } catch (e: Exception) {
             val detalhe = if (e is HttpException) "HTTP ${e.code()}" else e.javaClass.simpleName
-            AppLog.w(TAG, "falha ao consultar o dashboard: perfil=$perfil, id=$patientId, $detalhe")
+            AppLog.w(
+                TAG,
+                "falha ao consultar o dashboard: perfil=$perfil, id=${route.requestId}, $detalhe"
+            )
 
             // Sem internet ou erro do servidor: a adesão continua visível, calculada no Room.
             // Para cuidador isso devolve null (LocalAdherence não calcula no aparelho dele).

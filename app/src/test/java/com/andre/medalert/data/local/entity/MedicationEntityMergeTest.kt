@@ -65,9 +65,14 @@ class MedicationEntityMergeTest {
     )
 
     @Test
-    fun semRegistroAnterior_devolveOProprioRegistro() {
+    fun semRegistroAnterior_mantemTodosOsCamposEIniciaOAcompanhamentoAgora() {
+        // Antes este teste exigia a MESMA instância, mas o código devolve uma cópia que ganha
+        // acompanhadoDesde (o acompanhamento da adesão começa quando o aparelho conhece o remédio).
         val novo = completa()
-        assertSame(novo, novo.preservingDetailsFrom(null))
+        val agora = 1_700_000_000_000L
+        val resultado = novo.preservingDetailsFrom(null, nowMillis = agora)
+        assertEquals(agora, resultado.acompanhadoDesde)
+        assertEquals(novo.copy(acompanhadoDesde = agora), resultado)
     }
 
     @Test

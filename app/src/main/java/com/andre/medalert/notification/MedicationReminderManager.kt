@@ -3,7 +3,6 @@ package com.andre.medalert.notification
 import android.content.Context
 import com.andre.medalert.data.local.AppDatabase
 import com.andre.medalert.data.local.entity.MedicationEntity
-import com.andre.medalert.data.schedule.DoseScheduleCalculator
 import com.andre.medalert.data.local.UserPreferencesRepository
 import com.andre.medalert.data.session.AccessPolicy
 import com.andre.medalert.data.session.AlarmTarget
@@ -56,24 +55,24 @@ object MedicationReminderManager {
             if (fired > after) after = fired
         }
 
-        val scheduled = mutableSetOf<Long>()
-        medications.forEach { med ->
-            val next = DoseScheduleCalculator.nextDose(med, after) ?: return@forEach
+        // A decisão (o que agendar e o que cancelar) é do ReminderPlanner, que é puro e testado.
+        val plan = ReminderPlanner.plan(medications, store.ids(), after, zone)
+
+        plan.schedule.forEach { dose ->
             AlarmScheduler.scheduleDose(
                 context = app,
-                medicationLocalId = med.id,
-                medicationName = med.nome,
-                triggerAtMillis = next.atZone(zone).toInstant().toEpochMilli()
+                medicationLocalId = dose.medicationLocalId,
+                medicationName = dose.medicationName,
+                triggerAtMillis = dose.triggerAtMillis
             )
-            scheduled += med.id
         }
 
-        (store.ids() - scheduled).forEach { removedId ->
+        plan.cancel.forEach { removedId ->
             AlarmScheduler.cancel(app, removedId)
             SnoozeStore.cancel(app, removedId)
             NotificationHelper.cancelNotification(app, NotificationHelper.notificationIdFor(removedId))
         }
-        store.save(scheduled)
+        store.save(plan.schedule.map { it.medicationLocalId }.toSet())
     }
 
     /**

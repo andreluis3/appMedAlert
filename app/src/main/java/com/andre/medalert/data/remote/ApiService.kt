@@ -82,6 +82,16 @@ interface ApiService {
     @HTTP(method = "GET", path = "api/historys", hasBody = true)
     suspend fun getHistory(@Body request: HistoryQueryRequest): List<HistoryRecordDto>
 
+    /** Adesão do PACIENTE (paciente logado): {usuarioId} = ID do próprio paciente. */
     @GET("api/historys/dashboard/{usuarioId}")
     suspend fun getDashboard(@Path("usuarioId") userId: Int): DashboardResponse
+
+    /**
+     * Adesão do paciente vinculado, para o CUIDADOR. {cuidadorId} = ID do CUIDADOR logado
+     * (identity.userId), NUNCA o do paciente: o servidor resolve o paciente vinculado a partir
+     * do cuidador e devolve a adesão dele. O app não consegue garantir sozinho que o cuidador
+     * pode ver esses dados: o servidor precisa recusar (403) um cuidador não vinculado.
+     */
+    @GET("api/historys/dashboard/cuid/{cuidadorId}")
+    suspend fun getDashboardCuidador(@Path("cuidadorId") cuidadorId: Int): DashboardResponse
 }
